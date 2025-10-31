@@ -1,0 +1,265 @@
+import { GoogleGenAI, Type } from "@google/genai";
+import { Agent, Clarification, Conversation, Geolocation, PlanStep } from "../types";
+
+const API_KEY = process.env.API_KEY;
+
+if (!API_KEY) {
+  throw new Error("API_KEY environment variable not set");
+}
+
+const ai = new GoogleGenAI({ apiKey: API_KEY });
+
+const fileToGenerativePart = async (file: File) => {
+  const base64EncodedDataPromise = new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+    reader.readAsDataURL(file);
+  });
+  return {
+    inlineData: { data: await base64EncodedDataPromise, mimeType: file.type },
+  };
+};
+
+const planResponseSchema = {
+    type: Type.OBJECT,
+    properties: {
+        plan: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    step: { type: Type.INTEGER },
+                    agent: { type: Type.STRING, enum: Object.values(Agent) },
+                    task: { type: Type.STRING },
+                },
+                required: ["step", "agent", "task"],
+            },
+        },
+        clarification_needed: {
+            type: Type.OBJECT,
+            properties: {
+                question: { type: Type.STRING },
+                options: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            key: { type: Type.STRING },
+                            value: { type: Type.STRING },
+                        },
+                        required: ["key", "value"],
+                    }
+                }
+            },
+            required: ["question", "options"]
+        }
+    }
+};
+
+export const generatePlan = async (prompt: string, hasImage: boolean, hasVideo: boolean, history: Conversation[]): Promise<{ plan?: PlanStep[]; clarification?: Clarification }> => {
+  const historyText = history.length > 0
+    ? history
+        .map(c => `User: ${c.prompt}\nAhrian: ${c.results.find(r => r.agent === Agent.Orchestrator)?.result || 'Executing plan...'}`)
+        .join('\n---\n')
+    : 'No history yet.';
+
+  let fullPrompt = `You are "Ahrian", an AI Orchestrator. Your job is to create a plan for your team of specialized AI agents based on the user's request and the conversation history.
+
+Your available agents are:
+- SearchAgent: For web searches (news, facts, real-time info).
+- MapsAgent: For location-based queries (places, directions, distances).
+- VisionAgent: For analyzing an image provided by the user.
+- VideoAgent: For analyzing a video provided by the user.
+- EmailAgent: For sending emails.
+- SheetsAgent: A tool to format data into a spreadsheet. It must follow a data-providing agent. Its task is to take the output from the immediately preceding step and organize it.
+- DriveAgent: For interacting with files in a cloud drive.
+
+--- CONVERSATION HISTORY (FOR CONTEXT) ---
+${historyText}
+-------------------------------------------
+
+Now, analyze the user's NEW request based on the history above.
+
+User's New Request: "${prompt}"
+
+Your Task:
+1. Analyze the request in the context of the conversation.
+2. If the request is clear and actionable, create a step-by-step plan.
+3. **Clarification Rule**: If the user is asking for data (like a list, table, etc.) and it's unclear if they want a downloadable file or just to see it on screen, you MUST ask for clarification. Do this by responding with a 'clarification_needed' object instead of a 'plan'. The question should be direct, and the options should be clear (e.g., "Downloadable File" vs. "Display Only").
+4. If the user has already clarified or their intent is obvious (e.g., "create a spreadsheet of..."), generate the plan directly. A plan for a file MUST include a 'SheetsAgent' step.
+5. The final step should always be the 'Orchestrator' agent with the task "Synthesize the results into a final answer for the user."
+6. Your response must be a single JSON object matching the provided schema, containing EITHER a 'plan' OR a 'clarification_needed' field, but not both.`;
+  
+  if (hasImage) {
+    fullPrompt += "\nAn image has been provided. The VisionAgent must be used.";
+  }
+  if (hasVideo) {
+    fullPrompt += "\nA video has been provided. The VideoAgent must be used.";
+  }
+  
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-pro",
+      contents: fullPrompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: planResponseSchema,
+      },
+    });
+    const resultText = response.text.trim();
+    const resultJson = JSON.parse(resultText);
+
+    if (resultJson.plan) {
+        return { plan: resultJson.plan };
+    } else if (resultJson.clarification_needed) {
+        return { clarification: resultJson.clarification_needed };
+    } else {
+        throw new Error("AI response did not contain a plan or a clarification request.");
+    }
+  } catch (error) {
+    console.error("Error generating plan:", error);
+    throw new Error("Failed to generate a valid execution plan.");
+  }
+};
+
+
+const streamContent = async (
+    model: string, 
+    contents: any, 
+    config: any, 
+    onChunk: (chunk: string) => void
+) => {
+    const responseStream = await ai.models.generateContentStream({ model, contents, config });
+    for await (const chunk of responseStream) {
+        onChunk(chunk.text);
+    }
+};
+
+export const executeSearch = async (task: string, onChunk: (chunk: string) => void) => {
+    const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: task,
+        config: { tools: [{ googleSearch: {} }] },
+    });
+    
+    onChunk(response.text);
+
+    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    const sources = groundingChunks
+        .map((chunk: any) => ({
+            title: chunk.web?.title || 'Untitled',
+            uri: chunk.web?.uri || '',
+        }))
+        .filter((source: any) => source.uri);
+
+    return { sources };
+};
+
+export const executeMap = async (task: string, location: Geolocation | null, onChunk: (chunk: string) => void) => {
+    const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: task,
+        config: {
+          tools: [{googleMaps: {}}],
+          toolConfig: location ? { retrievalConfig: { latLng: { latitude: location.latitude, longitude: location.longitude } } } : undefined,
+        },
+    });
+
+    onChunk(response.text);
+
+    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    const sources = groundingChunks
+        .map((chunk: any) => ({
+            title: chunk.maps?.title || 'Untitled Place',
+            uri: chunk.maps?.uri || '',
+        }))
+        .filter((source: any) => source.uri);
+
+    return { sources };
+};
+
+export const executeVision = async (task: string, imageFile: File, onChunk: (chunk: string) => void) => {
+    const imagePart = await fileToGenerativePart(imageFile);
+    await streamContent("gemini-2.5-flash", { parts: [{ text: task }, imagePart] }, {}, onChunk);
+    return {};
+};
+
+export const executeVideo = async (task: string, videoFile: File, onChunk: (chunk: string) => void) => {
+    const prompt = `Analyze the user's request about a video. The user's task is: "${task}". The video file is named "${videoFile.name}" of type ${videoFile.type}. Based on this, provide a summary.`;
+    await streamContent("gemini-2.5-pro", prompt, {}, onChunk);
+    return {};
+};
+
+export const executeEmail = async (task: string, onChunk: (chunk: string) => void) => {
+    const result = `Simulated sending email based on task: "${task}".\n\nEmail prepared and sent successfully.`;
+    onChunk(result); 
+    return {};
+};
+
+export const executeSheets = async (task: string, previousData: string, onChunk: (chunk: string) => void) => {
+    const prompt = `You are a data formatting tool. Your job is to convert raw text data into a structured JSON array of objects based on a user's instruction.
+
+User's formatting instruction: "${task}"
+
+Raw data from previous step to be formatted:
+"""
+${previousData}
+"""
+
+Based on the instruction, process the raw data and generate a JSON object. The JSON object must have a single key "data", which is an array of objects. Each object represents a row. Respond with only the raw JSON object, without any markdown or explanations.`;
+
+    const response = await ai.models.generateContent({
+        model: "gemini-2.5-pro",
+        contents: prompt,
+        config: {
+            responseMimeType: "application/json",
+        }
+    });
+
+    let resultText = response.text.trim();
+    
+    // In case the model still returns markdown, strip it.
+    if (resultText.startsWith("```json")) {
+        resultText = resultText.substring(7, resultText.length - 3).trim();
+    } else if (resultText.startsWith("```")) {
+         resultText = resultText.substring(3, resultText.length - 3).trim();
+    }
+
+    const resultJson = JSON.parse(resultText);
+    
+    const rowCount = resultJson.data?.length || 0;
+    const summaryMessage = `Successfully formatted ${rowCount} rows of data from the previous step.`;
+    
+    onChunk(summaryMessage);
+
+    return { sheetData: resultJson.data };
+};
+
+export const executeDrive = async (task: string, onChunk: (chunk: string) => void) => {
+    let result = `Simulated Google Drive operation based on task: "${task}".\n\n`;
+    if (task.toLowerCase().includes("find") || task.toLowerCase().includes("search")) {
+        result += `Found 3 relevant files:\n- 'Project_Proposal_v3.docx'\n- 'Competitor_Analysis.pptx'\n- 'Meeting_Notes_2024-07-22.gdoc'`;
+    } else if (task.toLowerCase().includes("summarize")) {
+        result += `Summarized 'Project_Proposal_v3.docx': The document outlines a plan for a new mobile application, detailing the target audience, features, and marketing strategy.`;
+    } else {
+        result += `Operation completed successfully in Google Drive.`;
+    }
+    onChunk(result);
+    return {};
+};
+
+
+export const synthesizeAnswer = async (originalPrompt: string, results: { agent: Agent, task: string, result: string }[], onChunk: (chunk: string) => void) => {
+    const synthesisPrompt = `You are "Ahrian", the AI Orchestrator. Your agent team has completed their tasks. Now, your final job is to synthesize their findings into a single, comprehensive, and well-formatted answer for the user.
+
+Original User Request: "${originalPrompt}"
+
+Here are the results from your agents:
+${results.map(r => `- ${r.agent} (Task: "${r.task}"):\n  - Result: ${r.result}`).join('\n\n')}
+
+Synthesize these results into a final, user-friendly response. Address the user's original request directly. Do not mention the step-by-step process unless it's relevant to the answer. Use markdown for formatting.
+Crucially, DO NOT include any raw JSON data, JSON objects, or code blocks in your final answer. Present information in a clean, readable, natural language format. If a spreadsheet was created, simply state that it was created successfully and briefly describe its contents.`;
+    
+    await streamContent("gemini-2.5-pro", synthesisPrompt, {}, onChunk);
+    return {};
+};

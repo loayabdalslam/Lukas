@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ahrian: The AI Orchestrator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        --bg-color: #ffffff;
+        --text-color: #000000;
+        --border-color: #e5e7eb; /* gray-200 */
+        --card-bg-color: #f9fafb; /* gray-50 */
+        --hover-bg-color: #f3f4f6; /* gray-100 */
+        --scrollbar-track-bg: #f1f5f9;
+        --scrollbar-thumb-bg: #cbd5e1;
+      }
+      html.dark {
+        --bg-color: #000000;
+        --text-color: #ffffff;
+        --border-color: #374151; /* gray-700 */
+        --card-bg-color: #111827; /* gray-900 */
+        --hover-bg-color: #1f2937; /* gray-800 */
+        --scrollbar-track-bg: #1e293b;
+        --scrollbar-thumb-bg: #475569;
+      }
+      body {
+        font-family: 'Cairo', sans-serif;
+        background-color: var(--bg-color);
+        color: var(--text-color);
+      }
+      /* Scrollbar styles */
+      ::-webkit-scrollbar { width: 8px; }
+      ::-webkit-scrollbar-track { background: var(--scrollbar-track-bg); }
+      ::-webkit-scrollbar-thumb {
+        background-color: var(--scrollbar-thumb-bg);
+        border-radius: 10px;
+        border: 2px solid var(--scrollbar-track-bg);
+      }
+      /* Prose styles for markdown */
+      .prose { line-height: 1.6; }
+      .prose h1, .prose h2, .prose h3 { font-weight: 600; margin-top: 1.2em; margin-bottom: 0.5em; }
+      .prose ul { list-style-position: inside; padding-left: 1rem; }
+      .prose p { margin-bottom: 1em; }
+      .prose a { color: var(--text-color); text-decoration: underline; }
+      .prose table { width: 100%; border-collapse: collapse; }
+      .prose th, .prose td { border: 1px solid var(--border-color); padding: 8px; }
+      .prose th { background-color: var(--card-bg-color); }
+    </style>
+    <script>
+      if (localStorage.getItem('theme') === 'dark') {
+        document.documentElement.classList.add('dark')
+      } else {
+        document.documentElement.classList.remove('dark')
+      }
+    </script>
+    <script type="importmap">
+      {
+        "imports": {
+          "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+          "@google/genai": "https://aistudiocdn.com/@google/genai@^1.28.0",
+          "react/": "https://aistudiocdn.com/react@^19.2.0/",
+          "react": "https://aistudiocdn.com/react@^19.2.0",
+          "marked": "https://aistudiocdn.com/marked@^16.4.1"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
