@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,56 +7,80 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
-      :root {
-        --bg-color: #ffffff;
-        --text-color: #000000;
-        --border-color: #e5e7eb; /* gray-200 */
-        --card-bg-color: #f9fafb; /* gray-50 */
-        --hover-bg-color: #f3f4f6; /* gray-100 */
-        --scrollbar-track-bg: #f1f5f9;
-        --scrollbar-thumb-bg: #cbd5e1;
+      :root { /* Light Theme */
+        --bg-color: #f0f2f5;
+        --bg-secondary-color: #ffffff;
+        --bg-tertiary-color: #e4e6eb;
+        --text-color: #050505;
+        --text-secondary-color: #65676b;
+        --border-color: #ced0d4;
+        --hover-bg-color: #e4e6eb;
+        --accent-color: #1877f2;
+        --scrollbar-track-bg: #f5f5f5;
+        --scrollbar-thumb-bg: #ccc;
       }
-      html.dark {
-        --bg-color: #000000;
-        --text-color: #ffffff;
-        --border-color: #374151; /* gray-700 */
-        --card-bg-color: #111827; /* gray-900 */
-        --hover-bg-color: #1f2937; /* gray-800 */
-        --scrollbar-track-bg: #1e293b;
-        --scrollbar-thumb-bg: #475569;
+      html.dark { /* Dark Theme */
+        --bg-color: #18191a;
+        --bg-secondary-color: #242526;
+        --bg-tertiary-color: #3a3b3c;
+        --text-color: #e4e6eb;
+        --text-secondary-color: #b0b3b8;
+        --border-color: #3e4042;
+        --hover-bg-color: #3a3b3c;
+        --accent-color: #2d88ff;
+        --scrollbar-track-bg: #242526;
+        --scrollbar-thumb-bg: #4a4c4f;
       }
       body {
-        font-family: 'Cairo', sans-serif;
+        font-family: 'Inter', 'Cairo', sans-serif;
         background-color: var(--bg-color);
         color: var(--text-color);
+        overflow-y: hidden;
       }
-      /* Scrollbar styles */
+      ::selection {
+        background-color: var(--accent-color);
+        color: #fff;
+      }
       ::-webkit-scrollbar { width: 8px; }
       ::-webkit-scrollbar-track { background: var(--scrollbar-track-bg); }
       ::-webkit-scrollbar-thumb {
         background-color: var(--scrollbar-thumb-bg);
         border-radius: 10px;
-        border: 2px solid var(--scrollbar-track-bg);
       }
-      /* Prose styles for markdown */
-      .prose { line-height: 1.6; }
-      .prose h1, .prose h2, .prose h3 { font-weight: 600; margin-top: 1.2em; margin-bottom: 0.5em; }
+      .prose { 
+        color: var(--text-color); 
+        line-height: 1.6; 
+      }
+      .prose h1, .prose h2, .prose h3 { font-weight: 600; margin-top: 1.2em; margin-bottom: 0.5em; color: var(--text-color); }
       .prose ul { list-style-position: inside; padding-left: 1rem; }
       .prose p { margin-bottom: 1em; }
-      .prose a { color: var(--text-color); text-decoration: underline; }
+      .prose a { color: var(--accent-color); text-decoration: none; }
+      .prose a:hover { text-decoration: underline; }
       .prose table { width: 100%; border-collapse: collapse; }
       .prose th, .prose td { border: 1px solid var(--border-color); padding: 8px; }
-      .prose th { background-color: var(--card-bg-color); }
-    </style>
-    <script>
-      if (localStorage.getItem('theme') === 'dark') {
-        document.documentElement.classList.add('dark')
-      } else {
-        document.documentElement.classList.remove('dark')
+      .prose th { background-color: var(--bg-tertiary-color); }
+      .prose strong { color: var(--text-color); }
+      .prose code {
+        background-color: var(--hover-bg-color);
+        padding: 0.2em 0.4em;
+        border-radius: 4px;
+        font-size: 0.9em;
       }
-    </script>
+      .card {
+        background-color: var(--bg-secondary-color);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+      }
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateX(10px); }
+        to { opacity: 1; transform: translateX(0); }
+      }
+      .animate-fade-in {
+        animation: fadeIn 0.4s ease-out forwards;
+      }
+    </style>
     <script type="importmap">
       {
         "imports": {

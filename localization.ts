@@ -9,90 +9,45 @@ export interface Localization {
     statusRunning: string;
     statusCompleted: string;
     statusError: string;
-    yourRequest: string;
-    finalAnswer: string;
-    sources: string;
-    task: string;
-    result: string;
-    sheetPreviewTitle: string;
-    showingFirst10Rows: string;
-    showingAllXRows: string;
-    downloadFullCSV: string;
-    sheetGenerated: string;
     unknownError: string;
-    ahriansPlan: string;
-    executePlan: string;
-    clarificationNeeded: string;
-    agentDescSearchAgent: string;
-    agentDescMapsAgent: string;
-    agentDescVisionAgent: string;
-    agentDescVideoAgent: string;
-    agentDescEmailAgent: string;
-    agentDescSheetsAgent: string;
-    agentDescDriveAgent: string;
+    computerTitle: string;
+    computerStatusInactive: string;
+    computerStatusWaiting: string;
+    taskProgress: string;
+    errorMessage: string;
 }
 
 export const translations: Record<Lang, Localization> = {
     en: {
-        appTitle: "Ahrian: The AI Orchestrator",
-        appDescription: "Decomposing complex tasks for a team of specialized AI agents.",
-        promptPlaceholder: "Ask Ahrian to orchestrate a task...",
-        orchestrate: "Orchestrate",
+        appTitle: "Ahrian: AI Orchestrator",
+        appDescription: "An advanced AI that decomposes complex tasks and delegates them to a team of specialized AI agents.",
+        promptPlaceholder: "Send message to Ahrian...",
+        orchestrate: "Send",
         statusPending: "Pending",
         statusRunning: "Running",
         statusCompleted: "Completed",
         statusError: "Error",
-        yourRequest: "Your Request",
-        finalAnswer: "Final Answer",
-        sources: "Sources",
-        task: "Task",
-        result: "Result",
-        sheetPreviewTitle: "Sheet Preview",
-        showingFirst10Rows: "Showing first 10 of {0} rows.",
-        showingAllXRows: "Showing all {0} rows.",
-        downloadFullCSV: "Download Full File",
-        sheetGenerated: "Spreadsheet generated. Preview available below.",
         unknownError: "An unknown error occurred.",
-        ahriansPlan: "Ahrian's Plan",
-        executePlan: "Execute Plan",
-        clarificationNeeded: "Clarification Needed",
-        agentDescSearchAgent: "Web searches.",
-        agentDescMapsAgent: "Location queries.",
-        agentDescVisionAgent: "Image analysis.",
-        agentDescVideoAgent: "Video analysis.",
-        agentDescEmailAgent: "Send emails.",
-        agentDescSheetsAgent: "Manage sheets.",
-        agentDescDriveAgent: "Access drive.",
+        computerTitle: "Ahrian's Computer",
+        computerStatusInactive: "Ahrian's computer is inactive",
+        computerStatusWaiting: "Waiting for instructions",
+        taskProgress: "Task progress",
+        errorMessage: "I encountered an error"
     },
     ar: {
         appTitle: "أهريان: المنسق الذكي",
-        appDescription: "تفكيك المهام المعقدة لفريق من وكلاء الذكاء الاصطناعي المتخصصين.",
-        promptPlaceholder: "اطلب من أهريان تنسيق مهمة...",
-        orchestrate: "نسّق",
+        appDescription: "ذكاء اصطناعي متقدم يفكك المهام المعقدة ويفوضها إلى فريق من وكلاء الذكاء الاصطناعي المتخصصين.",
+        promptPlaceholder: "أرسل رسالة إلى أهريان...",
+        orchestrate: "إرسال",
         statusPending: "قيد الانتظار",
         statusRunning: "قيد التشغيل",
         statusCompleted: "مكتمل",
         statusError: "خطأ",
-        yourRequest: "طلبك",
-        finalAnswer: "الإجابة النهائية",
-        sources: "المصادر",
-        task: "المهمة",
-        result: "النتيجة",
-        sheetPreviewTitle: "معاينة الجدول",
-        showingFirst10Rows: "عرض أول 10 صفوف من أصل {0}.",
-        showingAllXRows: "عرض كل الصفوف وعددها {0}.",
-        downloadFullCSV: "تحميل الملف الكامل",
-        sheetGenerated: "تم إنشاء جدول البيانات. المعاينة متاحة أدناه.",
         unknownError: "حدث خطأ غير معروف.",
-        ahriansPlan: "خطة أهريان",
-        executePlan: "نفذ الخطة",
-        clarificationNeeded: "مطلوب توضيح",
-        agentDescSearchAgent: "بحث الويب.",
-        agentDescMapsAgent: "استعلامات الموقع.",
-        agentDescVisionAgent: "تحليل الصور.",
-        agentDescVideoAgent: "تحليل الفيديو.",
-        agentDescEmailAgent: "إرسال بريد.",
-        agentDescSheetsAgent: "إدارة الجداول.",
-        agentDescDriveAgent: "الوصول للملفات.",
+        computerTitle: "حاسوب أهريان",
+        computerStatusInactive: "حاسوب أهريان غير نشط",
+        computerStatusWaiting: "في انتظار التعليمات",
+        taskProgress: "تقدم المهمة",
+        errorMessage: "واجهتني مشكلة"
     }
 };

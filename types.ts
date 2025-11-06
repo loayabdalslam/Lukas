@@ -58,4 +58,5 @@ export interface Conversation {
     status: 'planning' | 'clarification_needed' | 'executing' | 'completed' | 'error';
     generatedFile?: StoredFile | null;
     clarification?: Clarification | null;
+    errorMessage?: string;
 }
