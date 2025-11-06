@@ -88,7 +88,7 @@ const AgentVisualizer: React.FC<{ step: StepResult | null; t: (key: keyof Locali
     };
 
     return (
-        <div className="h-full bg-[var(--bg-secondary-color)] rounded-b-lg overflow-hidden">
+        <div className="h-full bg-[var(--bg-secondary-color)] rounded-b-lg">
             {renderContent()}
         </div>
     );
@@ -442,6 +442,11 @@ const App: React.FC = () => {
                     const completedStep = { ...step, result: fullStepResult, status: 'completed' as const, sources: r.sources };
                     updateStepResult(convoId, step.step, completedStep);
                     stepOutputs.push(completedStep);
+
+                    // Pause after completing a step to let the user see the result, but not after the final step.
+                    if (step.step < plan.length) {
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                    }
                 } catch (e: any) {
                     updateStepResult(convoId, step.step, { status: 'error', result: e.message }); throw e;
                 }

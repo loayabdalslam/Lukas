@@ -267,7 +267,14 @@ Here are the results from your agents so far:
 ${results.map(r => `- ${r.agent} (Task: "${r.task}"):\n  - Result: ${r.result}`).join('\n\n')}
 
 Your current internal task is: "${task}".
-Based on the progress, provide a brief, user-facing status update in 1-2 sentences. Explain what you've just done or what you've concluded, and what you're about to do next. Do not talk about agents or plans. Speak naturally to the user. For example: "Okay, I've created a checklist to find the best cafes. Now, I'll start by searching for top-rated options." or "I've finished looking up the cafes. Next, I will find their exact locations on a map."`;
+
+Your response must be user-facing.
+
+**Instructions:**
+- If your task is to create a "to-do list" or "checklist", you MUST respond with the complete to-do list formatted in Markdown. Start with a brief introductory sentence (e.g., "Here is my plan:").
+- If your task is to "validate" or "check progress", you MUST respond with a brief, conversational status update (1-2 sentences). Explain what you've just done and what you'll do next (e.g., "I've found the cafes, now I'll get their addresses.").
+
+Do not talk about agents or internal plans. Speak naturally to the user.`;
     
     await streamContent("gemini-2.5-pro", synthesisPrompt, {}, onChunk);
     return {};
