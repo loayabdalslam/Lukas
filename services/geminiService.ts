@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { Agent, Clarification, Conversation, Geolocation, PlanStep } from "../types";
+import { Agent, Clarification, Conversation, Geolocation, PlanStep, GroundingSource, StepResult } from "../types";
 
 const API_KEY = process.env.API_KEY;
 
@@ -56,14 +56,14 @@ const planResponseSchema = {
     }
 };
 
-export const generatePlan = async (prompt: string, hasImage: boolean, hasVideo: boolean, history: Conversation[]): Promise<{ plan?: PlanStep[]; clarification?: Clarification }> => {
+export const generatePlan = async (prompt: string, hasImage: boolean, hasVideo: boolean, history: Conversation[], cycleCount: number): Promise<{ plan?: PlanStep[]; clarification?: Clarification }> => {
   const historyText = history.length > 0
     ? history
-        .map(c => `User: ${c.prompt}\nAhrian: ${c.results.find(r => r.agent === Agent.Orchestrator)?.result || 'Executing plan...'}`)
+        .map(c => `User: ${c.prompt}\nLukas: ${c.results.find(r => r.agent === Agent.Orchestrator)?.result || 'Executing plan...'}`)
         .join('\n---\n')
     : 'No history yet.';
 
-  let fullPrompt = `You are "Ahrian", an AI Orchestrator. Your job is to create a plan for your team of specialized AI agents based on the user's request and the conversation history.
+  let fullPrompt = `You are "Lukas", an AI Orchestrator. Your job is to create a plan for your team of specialized AI agents based on the user's request and the conversation history.
 
 Your available agents are:
 - SearchAgent: For web searches (news, facts, real-time info).
@@ -78,17 +78,25 @@ Your available agents are:
 ${historyText}
 -------------------------------------------
 
-Now, analyze the user's NEW request based on the history above.
+User Settings: The user has set an iteration 'cycle count' of ${cycleCount}. A higher number (e.g., 3-5) indicates a request for a more thorough, multi-step, and exhaustive plan. A lower number (e.g., 1) is for a standard, direct plan. Factor this into the complexity and depth of the plan you generate.
+
+Now, analyze the user's NEW request based on the history and settings above.
 
 User's New Request: "${prompt}"
 
 Your Task:
-1. Analyze the request in the context of the conversation.
-2. If the request is clear and actionable, create a step-by-step plan.
-3. **Clarification Rule**: If the user is asking for data (like a list, table, etc.) and it's unclear if they want a downloadable file or just to see it on screen, you MUST ask for clarification. Do this by responding with a 'clarification_needed' object instead of a 'plan'. The question should be direct, and the options should be clear (e.g., "Downloadable File" vs. "Display Only").
-4. If the user has already clarified or their intent is obvious (e.g., "create a spreadsheet of..."), generate the plan directly. A plan for a file MUST include a 'SheetsAgent' step.
-5. The final step should always be the 'Orchestrator' agent with the task "Synthesize the results into a final answer for the user."
-6. Your response must be a single JSON object matching the provided schema, containing EITHER a 'plan' OR a 'clarification_needed' field, but not both.`;
+1.  Analyze the request in the context of the conversation and cycle count.
+2.  If the request is clear and actionable, create a step-by-step plan using the mandatory "To-Do & Validate" structure described below.
+3.  **Clarification Rule**: If the user is asking for data (like a list, table, etc.) and it's unclear if they want a downloadable file or just to see it on screen, you MUST ask for clarification. Do this by responding with a 'clarification_needed' object instead of a 'plan'. The question should be direct, and the options should be clear (e.g., "Downloadable File" vs. "Display Only").
+4.  If the user has already clarified or their intent is obvious (e.g., "create a spreadsheet of..."), generate the plan directly. A plan for a file MUST include a 'SheetsAgent' step.
+
+**Mandatory "To-Do & Validate" Planning Structure:**
+1.  Your **first step** MUST be the 'Orchestrator' agent. The task for this step is to create a high-level to-do list for the user's request. Example task: "Create a detailed to-do list to address the user's request."
+2.  After EACH data-gathering or action agent step (SearchAgent, MapsAgent, VisionAgent, VideoAgent, DriveAgent), you MUST insert an 'Orchestrator' agent step. The task for this step is to validate the results of the previous step against the to-do list and confirm the plan is on track. Example task: "Validate progress against the to-do list and decide the next action."
+3.  The **final step** is, as before, the 'Orchestrator' agent with the task "Synthesize the results into a final answer for the user."
+This creates a mandatory cycle: Plan (To-Do) -> Act -> Validate -> Act -> Validate -> ... -> Synthesize.
+
+Your response must be a single JSON object matching the provided schema, containing EITHER a 'plan' OR a 'clarification_needed' field, but not both.`;
   
   if (hasImage) {
     fullPrompt += "\nAn image has been provided. The VisionAgent must be used.";
@@ -149,6 +157,7 @@ export const executeSearch = async (task: string, onChunk: (chunk: string) => vo
         .map((chunk: any) => ({
             title: chunk.web?.title || 'Untitled',
             uri: chunk.web?.uri || '',
+            agent: Agent.SearchAgent,
         }))
         .filter((source: any) => source.uri);
 
@@ -172,6 +181,7 @@ export const executeMap = async (task: string, location: Geolocation | null, onC
         .map((chunk: any) => ({
             title: chunk.maps?.title || 'Untitled Place',
             uri: chunk.maps?.uri || '',
+            agent: Agent.MapsAgent,
         }))
         .filter((source: any) => source.uri);
 
@@ -184,9 +194,10 @@ export const executeVision = async (task: string, imageFile: File, onChunk: (chu
     return {};
 };
 
+// FIX: Updated `executeVideo` to correctly process and send the video file to the Gemini API.
 export const executeVideo = async (task: string, videoFile: File, onChunk: (chunk: string) => void) => {
-    const prompt = `Analyze the user's request about a video. The user's task is: "${task}". The video file is named "${videoFile.name}" of type ${videoFile.type}. Based on this, provide a summary.`;
-    await streamContent("gemini-2.5-pro", prompt, {}, onChunk);
+    const videoPart = await fileToGenerativePart(videoFile);
+    await streamContent("gemini-2.5-pro", { parts: [{ text: task }, videoPart] }, {}, onChunk);
     return {};
 };
 
@@ -248,9 +259,23 @@ export const executeDrive = async (task: string, onChunk: (chunk: string) => voi
     return {};
 };
 
+export const executeOrchestratorIntermediateStep = async (task: string, originalPrompt: string, results: StepResult[], onChunk: (chunk: string) => void) => {
+    const synthesisPrompt = `You are "Lukas", the AI Orchestrator, in the middle of executing a plan.
+Original User Request: "${originalPrompt}"
+
+Here are the results from your agents so far:
+${results.map(r => `- ${r.agent} (Task: "${r.task}"):\n  - Result: ${r.result}`).join('\n\n')}
+
+Your current internal task is: "${task}".
+Based on the progress, provide a brief, user-facing status update in 1-2 sentences. Explain what you've just done or what you've concluded, and what you're about to do next. Do not talk about agents or plans. Speak naturally to the user. For example: "Okay, I've created a checklist to find the best cafes. Now, I'll start by searching for top-rated options." or "I've finished looking up the cafes. Next, I will find their exact locations on a map."`;
+    
+    await streamContent("gemini-2.5-pro", synthesisPrompt, {}, onChunk);
+    return {};
+};
+
 
 export const synthesizeAnswer = async (originalPrompt: string, results: { agent: Agent, task: string, result: string }[], onChunk: (chunk: string) => void) => {
-    const synthesisPrompt = `You are "Ahrian", the AI Orchestrator. Your agent team has completed their tasks. Now, your final job is to synthesize their findings into a single, comprehensive, and well-formatted answer for the user.
+    const synthesisPrompt = `You are "Lukas", the AI Orchestrator. Your agent team has completed their tasks. Now, your final job is to synthesize their findings into a single, comprehensive, and well-formatted answer for the user.
 
 Original User Request: "${originalPrompt}"
 

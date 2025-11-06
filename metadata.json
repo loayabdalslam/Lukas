@@ -1,5 +1,5 @@
 {
-  "name": "Ahrian: The AI Orchestrator",
+  "name": "Lukas: The AI Orchestrator",
   "description": "An advanced AI orchestrator that decomposes complex tasks and delegates them to a team of specialized AI agents (Search, Maps, Vision, Video) to provide comprehensive, well-structured answers.",
   "requestFramePermissions": [
     "geolocation"

@@ -19,6 +19,7 @@ export interface PlanStep {
 export interface GroundingSource {
   title: string;
   uri: string;
+  agent: Agent;
 }
 
 export interface StoredFile {
