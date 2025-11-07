@@ -19,7 +19,7 @@ const AgentVisualizer: React.FC<{ step: StepResult | null; t: (key: keyof Locali
     const renderContent = () => {
         if (!step) {
              return (
-                <div className="flex flex-col items-center justify-center h-full text-center text-[var(--text-secondary-color)] p-4">
+                <div className="flex flex-col items-center justify-center flex-grow text-center text-[var(--text-secondary-color)] p-4">
                     <ComputerIcon className="w-20 h-20 text-[var(--text-secondary-color)] opacity-50" />
                     <p className="mt-4 font-bold text-lg text-[var(--text-color)]">{t('computerTitle')}</p>
                     <p className="text-sm">{t('computerStatusWaiting')}</p>
@@ -31,7 +31,7 @@ const AgentVisualizer: React.FC<{ step: StepResult | null; t: (key: keyof Locali
              switch (step.agent) {
                 case Agent.SearchAgent:
                     return (
-                        <div className="w-full h-full bg-[var(--bg-secondary-color)] p-4 animate-pulse">
+                        <div className="w-full flex-grow bg-[var(--bg-secondary-color)] p-4 animate-pulse">
                             <div className="flex items-center space-x-2 rtl:space-x-reverse mb-4">
                                <SearchIcon className="w-5 h-5 text-blue-500" />
                                <p className="text-sm font-semibold truncate">{step.task}</p>
@@ -46,7 +46,7 @@ const AgentVisualizer: React.FC<{ step: StepResult | null; t: (key: keyof Locali
                     );
                 default:
                      return (
-                         <div className="flex flex-col items-center justify-center h-full text-center p-4">
+                         <div className="flex flex-col items-center justify-center flex-grow text-center p-4">
                             <AgentIcon agent={step.agent} className="w-16 h-16 text-[var(--accent-color)]" />
                             <p className="mt-4 font-bold">{step.agent}</p>
                             <p className="text-sm text-secondary-color">{step.task}</p>
@@ -64,7 +64,7 @@ const AgentVisualizer: React.FC<{ step: StepResult | null; t: (key: keyof Locali
                 const mapQuery = step.result || step.task;
 
                 return (
-                    <div className="w-full h-full bg-[var(--bg-secondary-color)] flex flex-col">
+                    <div className="w-full flex-grow bg-[var(--bg-secondary-color)] flex flex-col">
                         <div className="p-2 border-b border-[var(--border-color)] flex items-center space-x-2 rtl:space-x-reverse flex-shrink-0">
                            <MapIcon className="w-5 h-5 text-green-500" />
                            <p className="text-sm font-semibold truncate">{step.task}</p>
@@ -80,7 +80,7 @@ const AgentVisualizer: React.FC<{ step: StepResult | null; t: (key: keyof Locali
             }
             default:
                  return (
-                    <div className="p-4 overflow-y-scroll h-full">
+                    <div className="p-4 overflow-y-auto flex-grow min-h-0">
                         <StreamingMarkdownRenderer content={step.result} />
                     </div>
                 )
@@ -88,7 +88,7 @@ const AgentVisualizer: React.FC<{ step: StepResult | null; t: (key: keyof Locali
     };
 
     return (
-        <div className="h-full bg-[var(--bg-secondary-color)] rounded-b-lg">
+        <div className="h-full bg-[var(--bg-secondary-color)] rounded-b-lg flex flex-col overflow-hidden">
             {renderContent()}
         </div>
     );
