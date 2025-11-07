@@ -608,7 +608,7 @@ const App: React.FC = () => {
             <div className="flex-grow flex flex-col min-w-0">
                  <div className={`flex-grow min-h-0 grid ${showComputer ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
                     {/* Left Panel: Chat */}
-                    <div className="flex flex-col h-full bg-[var(--bg-color)]">
+                    <div className="flex flex-col h-full min-h-0 bg-[var(--bg-color)]">
                         <main className="flex-grow min-h-0 w-full overflow-y-scroll p-4 space-y-6">
                            {!activeConversation ? (
                              <div className="w-full h-full flex flex-col items-center justify-center text-center p-4">
