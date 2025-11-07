@@ -43,8 +43,8 @@ To get Lukas up and running on your local machine, follow these simple steps.
 
 1.  **Clone the Repository:**
     ```bash
-    git clone https://github.com/your-username/lukas-ai-orchestrator.git
-    cd lukas-ai-orchestrator
+    git clone https://github.com/loayabdalslam/Lukas.git
+    cd Lukas
     ```
 
 2.  **Install Dependencies:**
