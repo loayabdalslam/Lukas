@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Agent, StepResult, Conversation, StoredFile, PlanStep, Clarification, GroundingSource } from './types';
+import { Agent, StepResult, Conversation, StoredFile, PlanStep, Clarification, GroundingSource, Exchange } from './types';
 import { AgentIcon, ClockIcon, CheckCircleIcon, LoadingSpinnerIcon, SunIcon, MoonIcon, ComputerIcon, OrchestratorIcon, UserIcon, WindowCloseIcon, WindowMaximizeIcon, WindowMinimizeIcon, SearchIcon, MapIcon, ArrowUpIcon, SettingsIcon, CogIcon, SheetsIcon, ImageIcon, PaperclipIcon } from './components/icons';
 import { useLocation } from './hooks/useLocation';
 import { generatePlan, executeSearch, executeMap, executeVision, executeVideo, synthesizeAnswer, executeEmail, executeSheets, executeDrive, executeOrchestratorIntermediateStep, executeImageGeneration } from './services/geminiService';
@@ -256,7 +256,16 @@ const App: React.FC = () => {
     const [conversations, setConversations] = useState<Conversation[]>(() => {
         try {
             const saved = localStorage.getItem('lukas_conversations');
-            return saved ? JSON.parse(saved).map((c: Conversation) => ({ ...c, imageFile: null, videoFile: null })) : [];
+            if (!saved) return [];
+            const parsed = JSON.parse(saved);
+            return parsed.map((convo: Conversation) => ({
+                ...convo,
+                exchanges: convo.exchanges.map((ex: any) => ({
+                    ...ex,
+                    imageFile: null,
+                    videoFile: null,
+                }))
+            }));
         } catch { return []; }
     });
     const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -269,19 +278,23 @@ const App: React.FC = () => {
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     
     const activeConversation = useMemo(() => conversations.find(c => c.id === activeConversationId), [conversations, activeConversationId]);
+    const activeExchange = useMemo(() => {
+        if (!activeConversation) return null;
+        return activeConversation.exchanges[activeConversation.exchanges.length - 1];
+    }, [activeConversation]);
     
     const fileInputRef = useRef<HTMLInputElement>(null);
     const chatEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     
     useEffect(() => {
-        if (!activeConversation?.results || activeConversation.results.length === 0) { setViewedStep(null); return; }
-        const runningStep = activeConversation.results.find(r => r.status === 'running');
+        if (!activeExchange?.results || activeExchange.results.length === 0) { setViewedStep(null); return; }
+        const runningStep = activeExchange.results.find(r => r.status === 'running');
         if (runningStep) { setViewedStep(runningStep); return; }
-        const latestProcessedStep = [...activeConversation.results].reverse().find(r => r.status === 'completed' || r.status === 'error');
+        const latestProcessedStep = [...activeExchange.results].reverse().find(r => r.status === 'completed' || r.status === 'error');
         if (latestProcessedStep) { setViewedStep(latestProcessedStep); } 
-        else if (activeConversation.status === 'executing' && activeConversation.results.length > 0) { setViewedStep(activeConversation.results[0]); }
-    }, [activeConversation]);
+        else if (activeExchange.status === 'executing' && activeExchange.results.length > 0) { setViewedStep(activeExchange.results[0]); }
+    }, [activeExchange]);
 
     const t = useMemo(() => (key: keyof Localization, ...args: (string | number)[]) => {
         let translation = translations[lang][key] || translations['en'][key];
@@ -301,7 +314,11 @@ const App: React.FC = () => {
         localStorage.setItem('lukas_theme', theme);
     }, [theme]);
     useEffect(() => {
-        localStorage.setItem('lukas_conversations', JSON.stringify(conversations.map(({ imageFile, videoFile, ...rest }) => rest)));
+        const serializableConversations = conversations.map(convo => ({
+            ...convo,
+            exchanges: convo.exchanges.map(({ imageFile, videoFile, ...rest }) => rest)
+        }));
+        localStorage.setItem('lukas_conversations', JSON.stringify(serializableConversations));
     }, [conversations]);
     
     useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [activeConversation, isLoading]);
@@ -324,11 +341,25 @@ const App: React.FC = () => {
         if(fileInputRef.current) { fileInputRef.current.value = ""; }
     };
     
-    const updateStepResult = (convoId: string, step: number, updates: Partial<StepResult>, appendResult: string = '') => {
+    const updateExchange = (convoId: string, exchangeId: string, updates: Partial<Exchange>) => {
+        setConversations(prevConvos => prevConvos.map(c => {
+            if (c.id !== convoId) return c;
+            const newExchanges = c.exchanges.map(ex => 
+                ex.id === exchangeId ? { ...ex, ...updates } : ex
+            );
+            return { ...c, exchanges: newExchanges };
+        }));
+    };
+    
+    const updateStepResult = (convoId: string, exchangeId: string, step: number, updates: Partial<StepResult>, appendResult: string = '') => {
         setConversations(prev => prev.map(c => {
             if (c.id !== convoId) return c;
-            const newResults = c.results.map(r => r.step === step ? { ...r, ...updates, result: (updates.result !== undefined) ? updates.result : r.result + appendResult } : r);
-            return { ...c, results: newResults };
+            const newExchanges = c.exchanges.map(ex => {
+                if (ex.id !== exchangeId) return ex;
+                const newResults = ex.results.map(r => r.step === step ? { ...r, ...updates, result: (updates.result !== undefined) ? updates.result : r.result + appendResult } : r);
+                return { ...ex, results: newResults };
+            });
+            return { ...c, exchanges: newExchanges };
         }));
     };
     
@@ -338,85 +369,114 @@ const App: React.FC = () => {
         setIsLoading(true);
         setPrompt('');
 
-        const newConversation: Conversation = {
-            id: Date.now().toString(), prompt: promptToSubmit, 
+        const exchangeId = Date.now().toString();
+        const newExchange: Exchange = {
+            id: exchangeId,
+            prompt: promptToSubmit,
             imageFile: attachedFile && attachedFile.type.startsWith('image/') ? attachedFile : null,
             videoFile: attachedFile && attachedFile.type.startsWith('video/') ? attachedFile : null,
             plan: null, results: [], status: 'planning',
         };
         clearAttachment();
         
-        const history = conversations.filter(c => c.status === 'completed');
+        let convoToUpdateId: string;
+        let convoToUpdate: Conversation;
 
-        setConversations(prev => [...prev, newConversation]);
-        setActiveConversationId(newConversation.id);
+        if (activeConversationId) {
+            convoToUpdateId = activeConversationId;
+            setConversations(prev => prev.map(c => {
+                if (c.id !== convoToUpdateId) return c;
+                convoToUpdate = { ...c, exchanges: [...c.exchanges, newExchange] };
+                return convoToUpdate;
+            }));
+        } else {
+            const newConvoId = Date.now().toString();
+            convoToUpdateId = newConvoId;
+            convoToUpdate = {
+                id: newConvoId,
+                title: promptToSubmit,
+                exchanges: [newExchange]
+            };
+            setConversations(prev => [...prev, convoToUpdate]);
+            setActiveConversationId(newConvoId);
+        }
         
-        try {
-            const planResponse = await generatePlan(promptToSubmit, !!newConversation.imageFile, !!newConversation.videoFile, history, cycleCount);
+        const currentConvo = conversations.find(c => c.id === convoToUpdateId) || convoToUpdate!;
+        const history = (currentConvo.exchanges || [])
+            .slice(0, -1)
+            .filter(ex => ex.status === 'completed')
+            .map(ex => ({ prompt: ex.prompt, results: ex.results }));
 
-            setConversations(prev => prev.map(c => c.id === newConversation.id ? { ...c, plan: planResponse.plan || null, clarification: planResponse.clarification || null, status: planResponse.clarification ? 'clarification_needed' : 'planning' } : c));
+        try {
+            const planResponse = await generatePlan(promptToSubmit, !!newExchange.imageFile, !!newExchange.videoFile, history as any, cycleCount);
+
+            updateExchange(convoToUpdateId, exchangeId, {
+                plan: planResponse.plan || null,
+                clarification: planResponse.clarification || null,
+                status: planResponse.clarification ? 'clarification_needed' : 'planning'
+            });
             
             if(planResponse.plan) {
-                await handleExecute({ ...newConversation, plan: planResponse.plan });
+                 await handleExecute(convoToUpdateId, exchangeId, newExchange, planResponse.plan);
             }
         } catch (err: any) { 
             const errorMessage = err.message || t('unknownError');
-            setConversations(prev => prev.map(c => c.id === newConversation.id ? { ...c, status: 'error', errorMessage } : c));
+            updateExchange(convoToUpdateId, exchangeId, { status: 'error', errorMessage });
         } 
         finally { setIsLoading(false); }
     };
     
     const handlePlan = () => handleSubmitPrompt(prompt);
 
-    const handleClarificationResponse = async (convo: Conversation, selectedOption: { key: string; value: string; }) => {
+    const handleClarificationResponse = async (convoId: string, exchangeId: string, exchange: Exchange, selectedOption: { key: string; value: string; }) => {
         setIsLoading(true);
-        setConversations(prev => prev.map(c => c.id === convo.id ? { ...c, status: 'planning', clarification: null } : c));
-        
-        const clarifiedPrompt = `The user's original request was: "${convo.prompt}". I asked for clarification, and the user chose: "${selectedOption.value}". Now, please generate the execution plan based on this clarified request.`;
+        updateExchange(convoId, exchangeId, { status: 'planning', clarification: null });
+
+        const clarifiedPrompt = `The user's original request was: "${exchange.prompt}". I asked for clarification, and the user chose: "${selectedOption.value}". Now, please generate the execution plan based on this clarified request.`;
         
         try {
-            const history = conversations.filter(c => c.id !== convo.id && c.status === 'completed');
-            const planResponse = await generatePlan(clarifiedPrompt, !!convo.imageFile, !!convo.videoFile, history, cycleCount);
+            const currentConvo = conversations.find(c => c.id === convoId)!;
+            const history = currentConvo.exchanges
+                .filter(ex => ex.id !== exchangeId && ex.status === 'completed')
+                .map(ex => ({ prompt: ex.prompt, results: ex.results }));
+
+            const planResponse = await generatePlan(clarifiedPrompt, !!exchange.imageFile, !!exchange.videoFile, history as any, cycleCount);
             if (!planResponse.plan) throw new Error("Failed to get a plan after clarification.");
             
-            const conversationToExecute: Conversation = { ...convo, plan: planResponse.plan, clarification: null, status: 'planning' };
-            setConversations(prev => prev.map(c => c.id === convo.id ? conversationToExecute : c));
-            await handleExecute(conversationToExecute);
+            updateExchange(convoId, exchangeId, { plan: planResponse.plan, clarification: null, status: 'planning' });
+            await handleExecute(convoId, exchangeId, { ...exchange, plan: planResponse.plan }, planResponse.plan);
 
         } catch (err: any) {
             const errorMessage = err.message || t('unknownError');
-            setConversations(prev => prev.map(c => c.id === convo.id ? { ...c, status: 'error', errorMessage } : c));
+            updateExchange(convoId, exchangeId, { status: 'error', errorMessage });
         } finally { setIsLoading(false); }
     };
 
-    const handleExecute = async (conversation: Conversation) => {
-        const { id: convoId, plan } = conversation;
-        if (!plan) return;
-
+    const handleExecute = async (convoId: string, exchangeId: string, exchange: Exchange, plan: PlanStep[]) => {
         let generatedSheetFile: StoredFile | null = null;
         try {
             setIsLoading(true);
-            setConversations(prev => prev.map(c => c.id === convoId ? { ...c, status: 'executing', plan, results: plan.map(step => ({ ...step, result: '', status: 'pending' })) } : c));
+            updateExchange(convoId, exchangeId, { status: 'executing', plan, results: plan.map(step => ({ ...step, result: '', status: 'pending' })) });
             
             let stepOutputs: StepResult[] = [];
             for (const step of plan) {
-                updateStepResult(convoId, step.step, { status: 'running' });
+                updateStepResult(convoId, exchangeId, step.step, { status: 'running' });
                 let fullStepResult = '';
                 
                 try {
-                    const onChunk = (chunk: string) => { updateStepResult(convoId, step.step, {}, chunk); fullStepResult += chunk; };
+                    const onChunk = (chunk: string) => { updateStepResult(convoId, exchangeId, step.step, {}, chunk); fullStepResult += chunk; };
                     let r: any = {};
                     let imageBase64Data: string | undefined;
                     
                     if (step.agent === Agent.Orchestrator) {
-                        if (step.step === plan.length) { r = await synthesizeAnswer(conversation.prompt, stepOutputs, onChunk); } 
-                        else { r = await executeOrchestratorIntermediateStep(step.task, conversation.prompt, stepOutputs, onChunk); }
+                        if (step.step === plan.length) { r = await synthesizeAnswer(exchange.prompt, stepOutputs, onChunk); } 
+                        else { r = await executeOrchestratorIntermediateStep(step.task, exchange.prompt, stepOutputs, onChunk); }
                     } else {
                         switch (step.agent) {
                             case Agent.SearchAgent: r = await executeSearch(step.task, onChunk); break;
                             case Agent.MapsAgent: r = await executeMap(step.task, location, onChunk); break;
-                            case Agent.VisionAgent: r = await executeVision(step.task, conversation.imageFile!, onChunk); break;
-                            case Agent.VideoAgent: r = await executeVideo(step.task, conversation.videoFile!, onChunk); break;
+                            case Agent.VisionAgent: r = await executeVision(step.task, exchange.imageFile!, onChunk); break;
+                            case Agent.VideoAgent: r = await executeVideo(step.task, exchange.videoFile!, onChunk); break;
                             case Agent.ImageGenerationAgent:
                                 r = await executeImageGeneration(step.task, onChunk);
                                 imageBase64Data = r.imageBase64;
@@ -440,24 +500,24 @@ const App: React.FC = () => {
                         imageBase64: imageBase64Data,
                     };
 
-                    updateStepResult(convoId, step.step, completedStep);
+                    updateStepResult(convoId, exchangeId, step.step, completedStep);
                     stepOutputs.push(completedStep);
                     if (step.step < plan.length) { await new Promise(resolve => setTimeout(resolve, 1000)); }
                 } catch (e: any) {
-                    updateStepResult(convoId, step.step, { status: 'error', result: e.message }); throw e;
+                    updateStepResult(convoId, exchangeId, step.step, { status: 'error', result: e.message }); throw e;
                 }
             }
-            setConversations(prev => prev.map(c => c.id === convoId ? { ...c, status: 'completed', generatedFile: generatedSheetFile } : c));
+            updateExchange(convoId, exchangeId, { status: 'completed', generatedFile: generatedSheetFile });
         } catch (err: any) {
             console.error(err);
             const errorMessage = err.message || t('unknownError');
-            setConversations(prev => prev.map(c => c.id === convoId ? { ...c, status: 'error', errorMessage } : c));
+            updateExchange(convoId, exchangeId, { status: 'error', errorMessage });
         } finally {
             setIsLoading(false);
         }
     };
     
-    const showComputer = activeConversation && (activeConversation.status !== 'planning' && activeConversation.status !== 'clarification_needed');
+    const showComputer = activeExchange && (activeExchange.status !== 'planning' && activeExchange.status !== 'clarification_needed');
     
     const examplePrompts = [
         { icon: <MapIcon className="w-6 h-6 text-[var(--accent-color)]" />, title: "Find a place", prompt: "Find cafes near Central Park, NYC" },
@@ -466,6 +526,56 @@ const App: React.FC = () => {
     ];
 
     const handleNewChat = () => { setActiveConversationId(null); setViewedStep(null); }
+    
+    const renderExchangeResponse = (exchange: Exchange) => {
+        if (exchange.status === 'completed') {
+             const finalAnswer = exchange.results.find(r => r.agent === Agent.Orchestrator && r.step === exchange.plan?.length);
+             const finalImage = exchange.results.find(r => r.imageBase64);
+             if (!finalAnswer && !finalImage) return null;
+
+            const allSources = Array.from(new Map(exchange.results.flatMap(r => r.sources || []).map(s => [s.uri, s])).values());
+            
+            return (
+                <>
+                    {finalAnswer && (
+                        <ChatMessage 
+                            agent={Agent.Orchestrator} 
+                            content={<StreamingMarkdownRenderer content={finalAnswer.result} />}
+                            sources={allSources}
+                        />
+                    )}
+                    {finalImage && (
+                        <ChatMessage
+                            agent={Agent.Orchestrator}
+                            content={
+                                <img
+                                    src={`data:image/png;base64,${finalImage.imageBase64}`}
+                                    alt={finalImage.task}
+                                    className="rounded-lg max-w-full h-auto"
+                                />
+                            }
+                        />
+                    )}
+                </>
+            );
+        }
+        if (exchange.status === 'clarification_needed' && exchange.clarification && activeConversation) {
+            return (
+                <ChatMessage 
+                    agent={Agent.Orchestrator} 
+                    content={<ClarificationRequest 
+                        clarification={exchange.clarification} 
+                        onSelect={(option) => handleClarificationResponse(activeConversation.id, exchange.id, exchange, option)} 
+                        disabled={isLoading} 
+                    />} 
+                />
+            );
+        }
+        if (exchange.status === 'error' && exchange.errorMessage) {
+            return <ChatMessage agent={Agent.Orchestrator} content={`${t('errorMessage')}: ${exchange.errorMessage}`} />;
+        }
+        return null;
+    }
 
     return (
         <div className="h-screen w-screen flex bg-[var(--bg-color)] overflow-hidden">
@@ -479,7 +589,7 @@ const App: React.FC = () => {
                  <div className="flex-grow overflow-y-scroll p-2 space-y-1">
                     {conversations.slice().reverse().map(convo => (
                         <button key={convo.id} onClick={() => setActiveConversationId(convo.id)} className={`w-full text-left rtl:text-right p-2 rounded-md text-sm truncate ${activeConversationId === convo.id ? 'bg-[var(--accent-color)] text-white' : 'hover:bg-[var(--hover-bg-color)]'}`}>
-                            {convo.prompt || t('newChat')}
+                            {convo.title || t('newChat')}
                         </button>
                     ))}
                 </div>
@@ -518,39 +628,13 @@ const App: React.FC = () => {
                             </div>
                            ) : (
                             <>
-                                <ChatMessage agent={Agent.User} content={activeConversation.prompt} />
-                                {activeConversation.status === 'completed' && activeConversation.results.find(r => r.agent === Agent.Orchestrator && r.step === activeConversation.plan?.length) &&
-                                    <ChatMessage 
-                                        agent={Agent.Orchestrator} 
-                                        content={<StreamingMarkdownRenderer content={activeConversation.results.find(r => r.agent === Agent.Orchestrator && r.step === activeConversation.plan?.length)!.result} />}
-                                        sources={Array.from(new Map(activeConversation.results.flatMap(r => r.sources || []).map(s => [s.uri, s])).values())}
-                                    />
-                                }
-                                {activeConversation.status === 'completed' && (() => {
-                                    const imageStepResult = activeConversation.results.find(r => r.imageBase64);
-                                    if (imageStepResult) {
-                                        return (
-                                            <ChatMessage
-                                                agent={Agent.Orchestrator}
-                                                content={
-                                                    <img
-                                                        src={`data:image/png;base64,${imageStepResult.imageBase64}`}
-                                                        alt={imageStepResult.task}
-                                                        className="rounded-lg max-w-full h-auto"
-                                                    />
-                                                }
-                                            />
-                                        );
-                                    }
-                                    return null;
-                                })()}
-                                {activeConversation.status === 'clarification_needed' && activeConversation.clarification && (
-                                    <ChatMessage agent={Agent.Orchestrator} content={<ClarificationRequest clarification={activeConversation.clarification} onSelect={(option) => handleClarificationResponse(activeConversation, option)} disabled={isLoading} />} />
-                                )}
-                                {activeConversation.status === 'error' && activeConversation.errorMessage &&
-                                    <ChatMessage agent={Agent.Orchestrator} content={`${t('errorMessage')}: ${activeConversation.errorMessage}`} />
-                                }
-                               {isLoading && activeConversation.status !== 'completed' && <ChatMessage agent={Agent.Orchestrator} content={<div className="flex justify-center items-center p-2"><LoadingSpinnerIcon className="w-6 h-6" /></div>} />}
+                                {activeConversation.exchanges.map(exchange => (
+                                    <React.Fragment key={exchange.id}>
+                                        <ChatMessage agent={Agent.User} content={exchange.prompt} />
+                                        {renderExchangeResponse(exchange)}
+                                    </React.Fragment>
+                                ))}
+                               {isLoading && activeExchange && activeExchange.status !== 'completed' && <ChatMessage agent={Agent.Orchestrator} content={<div className="flex justify-center items-center p-2"><LoadingSpinnerIcon className="w-6 h-6" /></div>} />}
                             </>
                            )}
                             <div ref={chatEndRef} />
@@ -589,7 +673,7 @@ const App: React.FC = () => {
                                <VirtualComputer viewedStep={viewedStep} t={t} />
                            </div>
                            <div className="flex-1 min-h-0">
-                               <TaskProgress plan={activeConversation?.plan || null} results={activeConversation?.results || []} onStepSelect={setViewedStep} viewedStep={viewedStep} t={t} />
+                               <TaskProgress plan={activeExchange?.plan || null} results={activeExchange?.results || []} onStepSelect={setViewedStep} viewedStep={viewedStep} t={t} />
                            </div>
                         </div>
                     )}

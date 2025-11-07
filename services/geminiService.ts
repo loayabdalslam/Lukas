@@ -56,7 +56,8 @@ const planResponseSchema = {
     }
 };
 
-export const generatePlan = async (prompt: string, hasImage: boolean, hasVideo: boolean, history: Conversation[], cycleCount: number): Promise<{ plan?: PlanStep[]; clarification?: Clarification }> => {
+// FIX: Correctly type the history parameter to match the data being passed from App.tsx.
+export const generatePlan = async (prompt: string, hasImage: boolean, hasVideo: boolean, history: { prompt: string; results: StepResult[] }[], cycleCount: number): Promise<{ plan?: PlanStep[]; clarification?: Clarification }> => {
   const historyText = history.length > 0
     ? history
         .map(c => {
