@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Agent, StepResult, Conversation, StoredFile, PlanStep, Clarification, GroundingSource } from './types';
-import { AgentIcon, ClockIcon, CheckCircleIcon, LoadingSpinnerIcon, SunIcon, MoonIcon, ComputerIcon, OrchestratorIcon, UserIcon, WindowCloseIcon, WindowMaximizeIcon, WindowMinimizeIcon, SearchIcon, MapIcon, ArrowUpIcon, SettingsIcon, CogIcon, SheetsIcon } from './components/icons';
+import { AgentIcon, ClockIcon, CheckCircleIcon, LoadingSpinnerIcon, SunIcon, MoonIcon, ComputerIcon, OrchestratorIcon, UserIcon, WindowCloseIcon, WindowMaximizeIcon, WindowMinimizeIcon, SearchIcon, MapIcon, ArrowUpIcon, SettingsIcon, CogIcon, SheetsIcon, ImageIcon, PaperclipIcon } from './components/icons';
 import { useLocation } from './hooks/useLocation';
-import { generatePlan, executeSearch, executeMap, executeVision, executeVideo, synthesizeAnswer, executeEmail, executeSheets, executeDrive, executeOrchestratorIntermediateStep } from './services/geminiService';
+import { generatePlan, executeSearch, executeMap, executeVision, executeVideo, synthesizeAnswer, executeEmail, executeSheets, executeDrive, executeOrchestratorIntermediateStep, executeImageGeneration } from './services/geminiService';
 import { marked } from 'marked';
 import { translations, Localization, Lang } from './localization';
 
@@ -10,7 +10,7 @@ import { translations, Localization, Lang } from './localization';
 
 const StreamingMarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
     const html = useMemo(() => marked.parse(content, { gfm: true, breaks: true }), [content]);
-    return <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: html as string }} />;
+    return <div className="prose prose-sm max-w-none text-left rtl:text-right" dangerouslySetInnerHTML={{ __html: html as string }} />;
 };
 
 // --- RIGHT PANEL COMPONENTS ---
@@ -58,11 +58,7 @@ const AgentVisualizer: React.FC<{ step: StepResult | null; t: (key: keyof Locali
         // Completed / Error states
         switch (step.agent) {
             case Agent.MapsAgent: {
-                // The step.result contains the markdown list of places found by the agent.
-                // The Google Maps embed API is smart enough to parse this list and place pins for recognized locations.
-                // This is more reliable than trying to parse a single source URI.
                 const mapQuery = step.result || step.task;
-
                 return (
                     <div className="w-full flex-grow bg-[var(--bg-secondary-color)] flex flex-col">
                         <div className="p-2 border-b border-[var(--border-color)] flex items-center space-x-2 rtl:space-x-reverse flex-shrink-0">
@@ -96,7 +92,7 @@ const AgentVisualizer: React.FC<{ step: StepResult | null; t: (key: keyof Locali
 
 const VirtualComputer: React.FC<{ viewedStep: StepResult | null; t: (key: keyof Localization) => string; }> = ({ viewedStep, t }) => {
     return (
-        <div className="card flex flex-col flex-grow">
+        <div className="card flex flex-col h-full">
             <header className="flex items-center justify-between p-2 border-b border-[var(--border-color)]">
                 <div className="flex items-center space-x-2 rtl:space-x-reverse">
                     <AgentIcon agent={viewedStep?.agent || Agent.Orchestrator} className="w-4 h-4 text-[var(--text-secondary-color)]" />
@@ -122,7 +118,7 @@ const TaskProgress: React.FC<{
     t: (key: keyof Localization) => string; 
 }> = ({ plan, results, onStepSelect, viewedStep, t }) => {
     if (!plan || plan.length === 0) {
-        return <div className="card p-4 h-48"><h3 className="font-bold text-sm mb-2">{t('taskProgress')}</h3><p className="text-sm text-[var(--text-secondary-color)]">{t('computerStatusWaiting')}</p></div>
+        return <div className="card p-4 h-full"><h3 className="font-bold text-sm mb-2">{t('taskProgress')}</h3><p className="text-sm text-[var(--text-secondary-color)]">{t('computerStatusWaiting')}</p></div>
     }
     const getStatusIcon = (status: StepResult['status']) => {
         switch (status) {
@@ -134,7 +130,7 @@ const TaskProgress: React.FC<{
     }
     
     return (
-        <div className="card p-4 h-48 overflow-y-scroll">
+        <div className="card p-4 h-full overflow-y-scroll">
             <h3 className="font-bold text-sm mb-3">{t('taskProgress')}</h3>
             <ul className="space-y-1">
                 {plan.map(step => {
@@ -269,35 +265,23 @@ const App: React.FC = () => {
     const { location } = useLocation();
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [cycleCount, setCycleCount] = useState(1);
+    const [attachedFile, setAttachedFile] = useState<File | null>(null);
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     
     const activeConversation = useMemo(() => conversations.find(c => c.id === activeConversationId), [conversations, activeConversationId]);
     
-    useEffect(() => {
-        // If there's no active conversation or results, clear the view
-        if (!activeConversation?.results || activeConversation.results.length === 0) {
-            setViewedStep(null);
-            return;
-        }
-
-        const runningStep = activeConversation.results.find(r => r.status === 'running');
-        if (runningStep) {
-            // Always prioritize showing the currently running step
-            setViewedStep(runningStep);
-            return;
-        }
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const chatEndRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
     
-        const latestProcessedStep = [...activeConversation.results]
-            .reverse()
-            .find(r => r.status === 'completed' || r.status === 'error');
-
-        if (latestProcessedStep) {
-            setViewedStep(latestProcessedStep);
-        } else if (activeConversation.status === 'executing' && activeConversation.results.length > 0) {
-            setViewedStep(activeConversation.results[0]);
-        }
-
+    useEffect(() => {
+        if (!activeConversation?.results || activeConversation.results.length === 0) { setViewedStep(null); return; }
+        const runningStep = activeConversation.results.find(r => r.status === 'running');
+        if (runningStep) { setViewedStep(runningStep); return; }
+        const latestProcessedStep = [...activeConversation.results].reverse().find(r => r.status === 'completed' || r.status === 'error');
+        if (latestProcessedStep) { setViewedStep(latestProcessedStep); } 
+        else if (activeConversation.status === 'executing' && activeConversation.results.length > 0) { setViewedStep(activeConversation.results[0]); }
     }, [activeConversation]);
-
 
     const t = useMemo(() => (key: keyof Localization, ...args: (string | number)[]) => {
         let translation = translations[lang][key] || translations['en'][key];
@@ -320,14 +304,26 @@ const App: React.FC = () => {
         localStorage.setItem('lukas_conversations', JSON.stringify(conversations.map(({ imageFile, videoFile, ...rest }) => rest)));
     }, [conversations]);
     
-    const toggleTheme = () => setTheme(theme === 'light' ? 'dark' : 'light');
-    const toggleLang = () => setLang(lang === 'en' ? 'ar' : 'en');
-    
-    const chatEndRef = useRef<HTMLDivElement>(null);
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
     useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [activeConversation, isLoading]);
     useEffect(() => { if (textareaRef.current) { textareaRef.current.style.height = 'auto'; textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`; } }, [prompt]);
 
+    const toggleTheme = () => setTheme(theme === 'light' ? 'dark' : 'light');
+    const toggleLang = () => setLang(lang === 'en' ? 'ar' : 'en');
+
+    const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            setAttachedFile(file);
+            setPreviewUrl(URL.createObjectURL(file));
+        }
+    };
+
+    const clearAttachment = () => {
+        setAttachedFile(null);
+        if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }
+        if(fileInputRef.current) { fileInputRef.current.value = ""; }
+    };
+    
     const updateStepResult = (convoId: string, step: number, updates: Partial<StepResult>, appendResult: string = '') => {
         setConversations(prev => prev.map(c => {
             if (c.id !== convoId) return c;
@@ -335,43 +331,37 @@ const App: React.FC = () => {
             return { ...c, results: newResults };
         }));
     };
-
+    
     const handleSubmitPrompt = async (promptToSubmit: string) => {
-        if (!promptToSubmit.trim() || isLoading) return;
+        if ((!promptToSubmit.trim() && !attachedFile) || isLoading) return;
         
         setIsLoading(true);
         setPrompt('');
 
         const newConversation: Conversation = {
-            id: Date.now().toString(), prompt: promptToSubmit, imageFile: null, videoFile: null,
+            id: Date.now().toString(), prompt: promptToSubmit, 
+            imageFile: attachedFile && attachedFile.type.startsWith('image/') ? attachedFile : null,
+            videoFile: attachedFile && attachedFile.type.startsWith('video/') ? attachedFile : null,
             plan: null, results: [], status: 'planning',
         };
+        clearAttachment();
+        
+        const history = conversations.filter(c => c.status === 'completed');
+
         setConversations(prev => [...prev, newConversation]);
         setActiveConversationId(newConversation.id);
         
         try {
-            const planResponse = await generatePlan(promptToSubmit, false, false, [], cycleCount);
+            const planResponse = await generatePlan(promptToSubmit, !!newConversation.imageFile, !!newConversation.videoFile, history, cycleCount);
 
-            setConversations(prev => prev.map(c => 
-                c.id === newConversation.id 
-                ? { ...c, 
-                    plan: planResponse.plan || null, 
-                    clarification: planResponse.clarification || null,
-                    status: planResponse.clarification ? 'clarification_needed' : 'planning' 
-                  } 
-                : c
-            ));
+            setConversations(prev => prev.map(c => c.id === newConversation.id ? { ...c, plan: planResponse.plan || null, clarification: planResponse.clarification || null, status: planResponse.clarification ? 'clarification_needed' : 'planning' } : c));
             
             if(planResponse.plan) {
                 await handleExecute({ ...newConversation, plan: planResponse.plan });
             }
         } catch (err: any) { 
             const errorMessage = err.message || t('unknownError');
-            setConversations(prev => prev.map(c => 
-                c.id === newConversation.id 
-                ? { ...c, status: 'error', errorMessage } 
-                : c
-            ));
+            setConversations(prev => prev.map(c => c.id === newConversation.id ? { ...c, status: 'error', errorMessage } : c));
         } 
         finally { setIsLoading(false); }
     };
@@ -385,7 +375,8 @@ const App: React.FC = () => {
         const clarifiedPrompt = `The user's original request was: "${convo.prompt}". I asked for clarification, and the user chose: "${selectedOption.value}". Now, please generate the execution plan based on this clarified request.`;
         
         try {
-            const planResponse = await generatePlan(clarifiedPrompt, false, false, [], cycleCount);
+            const history = conversations.filter(c => c.id !== convo.id && c.status === 'completed');
+            const planResponse = await generatePlan(clarifiedPrompt, !!convo.imageFile, !!convo.videoFile, history, cycleCount);
             if (!planResponse.plan) throw new Error("Failed to get a plan after clarification.");
             
             const conversationToExecute: Conversation = { ...convo, plan: planResponse.plan, clarification: null, status: 'planning' };
@@ -415,19 +406,21 @@ const App: React.FC = () => {
                 try {
                     const onChunk = (chunk: string) => { updateStepResult(convoId, step.step, {}, chunk); fullStepResult += chunk; };
                     let r: any = {};
+                    let imageBase64Data: string | undefined;
                     
                     if (step.agent === Agent.Orchestrator) {
-                        if (step.step === plan.length) { // Final synthesis step
-                            r = await synthesizeAnswer(conversation.prompt, stepOutputs, onChunk);
-                        } else { // Intermediate to-do or validation step
-                            r = await executeOrchestratorIntermediateStep(step.task, conversation.prompt, stepOutputs, onChunk);
-                        }
+                        if (step.step === plan.length) { r = await synthesizeAnswer(conversation.prompt, stepOutputs, onChunk); } 
+                        else { r = await executeOrchestratorIntermediateStep(step.task, conversation.prompt, stepOutputs, onChunk); }
                     } else {
                         switch (step.agent) {
                             case Agent.SearchAgent: r = await executeSearch(step.task, onChunk); break;
                             case Agent.MapsAgent: r = await executeMap(step.task, location, onChunk); break;
                             case Agent.VisionAgent: r = await executeVision(step.task, conversation.imageFile!, onChunk); break;
                             case Agent.VideoAgent: r = await executeVideo(step.task, conversation.videoFile!, onChunk); break;
+                            case Agent.ImageGenerationAgent:
+                                r = await executeImageGeneration(step.task, onChunk);
+                                imageBase64Data = r.imageBase64;
+                                break;
                             case Agent.EmailAgent: r = await executeEmail(step.task, onChunk); break;
                             case Agent.DriveAgent: r = await executeDrive(step.task, onChunk); break;
                             case Agent.SheetsAgent: {
@@ -439,19 +432,21 @@ const App: React.FC = () => {
                         }
                     }
                     
-                    const completedStep = { ...step, result: fullStepResult, status: 'completed' as const, sources: r.sources };
+                    const completedStep: StepResult = {
+                        ...step,
+                        result: fullStepResult,
+                        status: 'completed',
+                        sources: r.sources,
+                        imageBase64: imageBase64Data,
+                    };
+
                     updateStepResult(convoId, step.step, completedStep);
                     stepOutputs.push(completedStep);
-
-                    // Pause after completing a step to let the user see the result, but not after the final step.
-                    if (step.step < plan.length) {
-                        await new Promise(resolve => setTimeout(resolve, 5000));
-                    }
+                    if (step.step < plan.length) { await new Promise(resolve => setTimeout(resolve, 1000)); }
                 } catch (e: any) {
                     updateStepResult(convoId, step.step, { status: 'error', result: e.message }); throw e;
                 }
             }
-
             setConversations(prev => prev.map(c => c.id === convoId ? { ...c, status: 'completed', generatedFile: generatedSheetFile } : c));
         } catch (err: any) {
             console.error(err);
@@ -466,14 +461,11 @@ const App: React.FC = () => {
     
     const examplePrompts = [
         { icon: <MapIcon className="w-6 h-6 text-[var(--accent-color)]" />, title: "Find a place", prompt: "Find cafes near Central Park, NYC" },
+        { icon: <ImageIcon className="w-6 h-6 text-[var(--accent-color)]" />, title: "Create an image", prompt: "Generate an image of a photorealistic cat wearing sunglasses" },
         { icon: <SheetsIcon className="w-6 h-6 text-[var(--accent-color)]" />, title: "Organize data", prompt: "Create a spreadsheet of the top 5 largest cities in the world by population in 2024" },
-        { icon: <SearchIcon className="w-6 h-6 text-[var(--accent-color)]" />, title: "Get latest news", prompt: "What are the latest developments in AI this week?" },
     ];
 
-    const handleNewChat = () => {
-        setActiveConversationId(null);
-        setViewedStep(null);
-    }
+    const handleNewChat = () => { setActiveConversationId(null); setViewedStep(null); }
 
     return (
         <div className="h-screen w-screen flex bg-[var(--bg-color)] overflow-hidden">
@@ -487,7 +479,7 @@ const App: React.FC = () => {
                  <div className="flex-grow overflow-y-scroll p-2 space-y-1">
                     {conversations.slice().reverse().map(convo => (
                         <button key={convo.id} onClick={() => setActiveConversationId(convo.id)} className={`w-full text-left rtl:text-right p-2 rounded-md text-sm truncate ${activeConversationId === convo.id ? 'bg-[var(--accent-color)] text-white' : 'hover:bg-[var(--hover-bg-color)]'}`}>
-                            {convo.prompt}
+                            {convo.prompt || t('newChat')}
                         </button>
                     ))}
                 </div>
@@ -504,7 +496,7 @@ const App: React.FC = () => {
 
             {/* Main Content */}
             <div className="flex-grow flex flex-col min-w-0">
-                <div className={`flex-grow min-h-0 grid ${showComputer ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
+                 <div className={`flex-grow min-h-0 grid ${showComputer ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
                     {/* Left Panel: Chat */}
                     <div className="flex flex-col h-full bg-[var(--bg-color)]">
                         <main className="flex-grow min-h-0 w-full overflow-y-scroll p-4 space-y-6">
@@ -516,16 +508,8 @@ const App: React.FC = () => {
                                 <div className="mt-8 w-full max-w-4xl">
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-left rtl:text-right">
                                         {examplePrompts.map((p, i) => (
-                                            <button 
-                                                key={i} 
-                                                onClick={() => handleSubmitPrompt(p.prompt)}
-                                                disabled={isLoading}
-                                                className="card p-4 hover:bg-[var(--hover-bg-color)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left rtl:text-right"
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    {p.icon}
-                                                    <h3 className="font-bold">{p.title}</h3>
-                                                </div>
+                                            <button key={i} onClick={() => handleSubmitPrompt(p.prompt)} disabled={isLoading} className="card p-4 hover:bg-[var(--hover-bg-color)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left rtl:text-right">
+                                                <div className="flex items-center gap-3">{p.icon} <h3 className="font-bold">{p.title}</h3></div>
                                                 <p className="text-sm text-[var(--text-secondary-color)] mt-2">{p.prompt}</p>
                                             </button>
                                         ))}
@@ -542,14 +526,26 @@ const App: React.FC = () => {
                                         sources={Array.from(new Map(activeConversation.results.flatMap(r => r.sources || []).map(s => [s.uri, s])).values())}
                                     />
                                 }
+                                {activeConversation.status === 'completed' && (() => {
+                                    const imageStepResult = activeConversation.results.find(r => r.imageBase64);
+                                    if (imageStepResult) {
+                                        return (
+                                            <ChatMessage
+                                                agent={Agent.Orchestrator}
+                                                content={
+                                                    <img
+                                                        src={`data:image/png;base64,${imageStepResult.imageBase64}`}
+                                                        alt={imageStepResult.task}
+                                                        className="rounded-lg max-w-full h-auto"
+                                                    />
+                                                }
+                                            />
+                                        );
+                                    }
+                                    return null;
+                                })()}
                                 {activeConversation.status === 'clarification_needed' && activeConversation.clarification && (
-                                    <ChatMessage agent={Agent.Orchestrator} content={
-                                        <ClarificationRequest 
-                                            clarification={activeConversation.clarification} 
-                                            onSelect={(option) => handleClarificationResponse(activeConversation, option)}
-                                            disabled={isLoading}
-                                        />
-                                    }/>
+                                    <ChatMessage agent={Agent.Orchestrator} content={<ClarificationRequest clarification={activeConversation.clarification} onSelect={(option) => handleClarificationResponse(activeConversation, option)} disabled={isLoading} />} />
                                 )}
                                 {activeConversation.status === 'error' && activeConversation.errorMessage &&
                                     <ChatMessage agent={Agent.Orchestrator} content={`${t('errorMessage')}: ${activeConversation.errorMessage}`} />
@@ -562,21 +558,25 @@ const App: React.FC = () => {
                         
                         <footer className="flex-shrink-0 p-4">
                             <div className="relative">
-                                <SettingsPopover 
-                                    isOpen={isSettingsOpen}
-                                    cycleCount={cycleCount}
-                                    setCycleCount={setCycleCount}
-                                    onClose={() => setIsSettingsOpen(false)}
-                                    t={t}
-                                />
+                                <SettingsPopover isOpen={isSettingsOpen} cycleCount={cycleCount} setCycleCount={setCycleCount} onClose={() => setIsSettingsOpen(false)} t={t} />
+                                {previewUrl && (
+                                    <div className="relative w-24 h-24 mb-2 p-1 border border-[var(--border-color)] rounded-md">
+                                        <img src={previewUrl} className="w-full h-full object-cover rounded" />
+                                        <button onClick={clearAttachment} className="absolute -top-2 -right-2 rtl:-right-auto rtl:-left-2 bg-gray-800 text-white rounded-full p-0.5"><WindowCloseIcon className="w-4 h-4" /></button>
+                                    </div>
+                                )}
                                 <div className="card p-2 flex items-end gap-2 rtl:space-x-reverse">
-                                     <button onClick={handlePlan} disabled={isLoading || !prompt.trim()} className="bg-[var(--accent-color)] text-white h-9 w-9 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all flex justify-center items-center flex-shrink-0">
-                                        {isLoading ? <LoadingSpinnerIcon className="w-5 h-5"/> : <ArrowUpIcon className="w-5 h-5" />}
-                                    </button>
+                                    <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*,video/*" />
+                                     <button onClick={() => fileInputRef.current?.click()} disabled={isLoading} className="p-1.5 rounded-md text-[var(--text-secondary-color)] hover:bg-[var(--hover-bg-color)] transition-colors flex-shrink-0 h-9 w-9 flex items-center justify-center">
+                                        <PaperclipIcon className="w-6 h-6" />
+                                     </button>
                                      <textarea ref={textareaRef} value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handlePlan(); } }} placeholder={t('promptPlaceholder')} className="flex-grow bg-transparent focus:outline-none resize-none text-base p-1.5 max-h-40" rows={1} disabled={isLoading} />
-                                     <button onClick={() => setIsSettingsOpen(prev => !prev)} className="p-1.5 rounded-md text-[var(--text-secondary-color)] hover:bg-[var(--hover-bg-color)] transition-colors">
+                                     <button onClick={() => setIsSettingsOpen(prev => !prev)} className="p-1.5 rounded-md text-[var(--text-secondary-color)] hover:bg-[var(--hover-bg-color)] transition-colors h-9 w-9 flex items-center justify-center flex-shrink-0">
                                         <CogIcon className="w-6 h-6" />
                                      </button>
+                                     <button onClick={handlePlan} disabled={isLoading || (!prompt.trim() && !attachedFile)} className="bg-[var(--accent-color)] text-white h-9 w-9 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all flex justify-center items-center flex-shrink-0">
+                                        {isLoading ? <LoadingSpinnerIcon className="w-5 h-5"/> : <ArrowUpIcon className="w-5 h-5" />}
+                                    </button>
                                 </div>
                             </div>
                         </footer>
@@ -585,14 +585,12 @@ const App: React.FC = () => {
                     {/* Right Panel: Computer */}
                     {showComputer && (
                         <div className="hidden lg:flex flex-col h-full p-4 space-y-4 bg-[var(--bg-tertiary-color)] border-l border-[var(--border-color)] animate-fade-in">
-                            <VirtualComputer viewedStep={viewedStep} t={t} />
-                            <TaskProgress 
-                                plan={activeConversation?.plan || null} 
-                                results={activeConversation?.results || []} 
-                                onStepSelect={setViewedStep}
-                                viewedStep={viewedStep}
-                                t={t}
-                            />
+                           <div className="flex-1 min-h-0">
+                               <VirtualComputer viewedStep={viewedStep} t={t} />
+                           </div>
+                           <div className="flex-1 min-h-0">
+                               <TaskProgress plan={activeConversation?.plan || null} results={activeConversation?.results || []} onStepSelect={setViewedStep} viewedStep={viewedStep} t={t} />
+                           </div>
                         </div>
                     )}
                 </div>

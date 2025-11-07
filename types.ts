@@ -6,6 +6,7 @@ export enum Agent {
   EmailAgent = 'EmailAgent',
   SheetsAgent = 'SheetsAgent',
   DriveAgent = 'DriveAgent',
+  ImageGenerationAgent = 'ImageGenerationAgent',
   Orchestrator = 'Orchestrator',
   User = 'User',
 }
@@ -36,6 +37,7 @@ export interface StepResult {
   result: string;
   sources?: GroundingSource[];
   status: 'pending' | 'running' | 'completed' | 'error';
+  imageBase64?: string;
 }
 
 export interface Geolocation {

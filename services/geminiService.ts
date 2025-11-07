@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { Agent, Clarification, Conversation, Geolocation, PlanStep, GroundingSource, StepResult } from "../types";
 
 const API_KEY = process.env.API_KEY;
@@ -59,7 +59,21 @@ const planResponseSchema = {
 export const generatePlan = async (prompt: string, hasImage: boolean, hasVideo: boolean, history: Conversation[], cycleCount: number): Promise<{ plan?: PlanStep[]; clarification?: Clarification }> => {
   const historyText = history.length > 0
     ? history
-        .map(c => `User: ${c.prompt}\nLukas: ${c.results.find(r => r.agent === Agent.Orchestrator)?.result || 'Executing plan...'}`)
+        .map(c => {
+            const orchestratorResults = (c.results || []).filter(r => r.agent === Agent.Orchestrator && r.status === 'completed');
+            
+            let lukasResponse = 'I executed the request.';
+            if (orchestratorResults.length > 0) {
+                // Find the result from the orchestrator step with the highest step number, which is the final answer.
+                const finalResult = orchestratorResults.reduce((prev, current) => (prev.step > current.step) ? prev : current);
+                lukasResponse = finalResult.result;
+            }
+            
+            // To keep the history prompt concise for the model
+            const conciseResponse = lukasResponse.length > 400 ? lukasResponse.substring(0, 400) + '...' : lukasResponse;
+
+            return `User: ${c.prompt}\nLukas: ${conciseResponse}`;
+        })
         .join('\n---\n')
     : 'No history yet.';
 
@@ -70,6 +84,7 @@ Your available agents are:
 - MapsAgent: For location-based queries (places, directions, distances).
 - VisionAgent: For analyzing an image provided by the user.
 - VideoAgent: For analyzing a video provided by the user.
+- ImageGenerationAgent: For creating a new image from a text description.
 - EmailAgent: For sending emails.
 - SheetsAgent: A tool to format data into a spreadsheet. It must follow a data-providing agent. Its task is to take the output from the immediately preceding step and organize it.
 - DriveAgent: For interacting with files in a cloud drive.
@@ -91,10 +106,10 @@ Your Task:
 4.  If the user has already clarified or their intent is obvious (e.g., "create a spreadsheet of..."), generate the plan directly. A plan for a file MUST include a 'SheetsAgent' step.
 
 **Mandatory "To-Do & Validate" Planning Structure:**
-1.  Your **first step** MUST be the 'Orchestrator' agent. The task for this step is to create a high-level to-do list for the user's request. Example task: "Create a detailed to-do list to address the user's request."
-2.  After EACH data-gathering or action agent step (SearchAgent, MapsAgent, VisionAgent, VideoAgent, DriveAgent), you MUST insert an 'Orchestrator' agent step. The task for this step is to validate the results of the previous step against the to-do list and confirm the plan is on track. Example task: "Validate progress against the to-do list and decide the next action."
-3.  The **final step** is, as before, the 'Orchestrator' agent with the task "Synthesize the results into a final answer for the user."
-This creates a mandatory cycle: Plan (To-Do) -> Act -> Validate -> Act -> Validate -> ... -> Synthesize.
+1.  Your **first step** MUST be the 'Orchestrator' agent. The task for this step is to create a high-level to-do list for the user's request.
+2.  After EACH data-gathering or action agent step (Search, Maps, Vision, Video, ImageGeneration, Drive), you MUST insert an 'Orchestrator' agent step to validate the results. Example task: "Validate progress against the to-do list and decide the next action."
+3.  The **final step** is always the 'Orchestrator' agent with the task "Synthesize the results into a final answer for the user."
+This creates a cycle: Plan (To-Do) -> Act -> Validate -> Act -> Validate -> ... -> Synthesize.
 
 Your response must be a single JSON object matching the provided schema, containing EITHER a 'plan' OR a 'clarification_needed' field, but not both.`;
   
@@ -199,6 +214,23 @@ export const executeVideo = async (task: string, videoFile: File, onChunk: (chun
     const videoPart = await fileToGenerativePart(videoFile);
     await streamContent("gemini-2.5-pro", { parts: [{ text: task }, videoPart] }, {}, onChunk);
     return {};
+};
+
+export const executeImageGeneration = async (task: string, onChunk: (chunk: string) => void) => {
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: { parts: [{ text: task }] },
+        config: { responseModalities: [Modality.IMAGE] },
+    });
+
+    for (const part of response.candidates[0].content.parts) {
+        if (part.inlineData) {
+            const base64ImageBytes: string = part.inlineData.data;
+            onChunk(`Successfully generated image based on the prompt: "${task}".`);
+            return { imageBase64: base64ImageBytes };
+        }
+    }
+    throw new Error("Image generation failed to return an image.");
 };
 
 export const executeEmail = async (task: string, onChunk: (chunk: string) => void) => {

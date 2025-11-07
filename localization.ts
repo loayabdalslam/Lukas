@@ -18,6 +18,7 @@ export interface Localization {
     settingsTitle: string;
     cycleCount: string;
     newChat: string;
+    attachFile: string;
 }
 
 export const translations: Record<Lang, Localization> = {
@@ -39,6 +40,7 @@ export const translations: Record<Lang, Localization> = {
         settingsTitle: "Settings",
         cycleCount: "Cycles",
         newChat: "New Chat",
+        attachFile: "Attach File",
     },
     ar: {
         appTitle: "لوكاس: المنسق الذكي",
@@ -58,5 +60,6 @@ export const translations: Record<Lang, Localization> = {
         settingsTitle: "الإعدادات",
         cycleCount: "الدورات",
         newChat: "محادثة جديدة",
+        attachFile: "إرفاق ملف",
     }
 };
