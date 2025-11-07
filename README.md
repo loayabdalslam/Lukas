@@ -1,58 +1,76 @@
 <div align="center">
-  <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+  <img width="1200" height="475" alt="Lukas AI Orchestrator Banner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
 # Lukas: The AI Orchestrator
 
-Lukas is an experimental web application that showcases the power of a multi-agent AI system built with the Gemini API. It provides a conversational interface where users can make complex requests, and an AI orchestrator breaks them down into a step-by-step plan and executes it using a variety of specialized agents.
+Lukas is a cutting-edge web application that demonstrates a powerful multi-agent AI system. It provides a conversational interface for users to submit complex requests, which are then intelligently decomposed and executed by a team of specialized AI agents. This project serves as a powerful example of how to build sophisticated, autonomous systems using the Google Gemini API.
 
-## ✨ Features
+## How It Works
+
+At its core, Lukas employs an **Orchestrator Agent** that acts as a project manager. When a user submits a request, the orchestrator analyzes it and creates a dynamic, step-by-step execution plan. It then delegates each step to the most appropriate specialized agent, continuously validating the results to ensure the plan stays on track. This cyclical process of planning, acting, and validating allows Lukas to tackle complex, multi-faceted problems with a high degree of accuracy.
+
+## Key Features
 
 - **Dynamic Task Planning:** Automatically generates multi-step plans based on user requests.
-- **Multi-Agent System:** Utilizes specialized agents for tasks like web search, map lookups, image analysis, and more.
-- **Interactive UI:** Watch the plan unfold in real-time, view the output of each agent, and interact with the results.
-- **Conversational:** Can ask clarifying questions to ensure the goal is understood correctly.
-- **Multi-language Support:** Available in both English and Arabic.
-- **Dark and Light Theme:** Switch between themes to suit your preference.
+- **Multi-Agent System:** Leverages a team of specialized AI agents for various tasks.
+- **Interactive UI:** Provides a real-time view of the execution plan and the results from each agent.
+- **Conversational AI:** Engages with the user to ask for clarification when a request is ambiguous.
+- **Bilingual Support:** Fully functional in both English and Arabic.
+- **Customizable Theme:** Offers both light and dark modes for user comfort.
 
-## 🚀 Getting Started
+## The Agent Team
 
-Follow these instructions to get the project up and running on your local machine.
+Lukas is equipped with a variety of specialized agents, each with a unique set of skills:
+
+- **`SearchAgent`:** Conducts web searches to find up-to-date information, news, and facts.
+- **`MapsAgent`:** Handles location-based queries, such as finding places, getting directions, and calculating distances.
+- **`VisionAgent`:** Analyzes and interprets images provided by the user.
+- **`VideoAgent`:** Processes and understands video content.
+- **`EmailAgent`:** Sends emails on behalf of the user.
+- **`SheetsAgent`:** Formats data into structured spreadsheets.
+- **`DriveAgent`:** Interacts with files stored in a cloud drive.
+
+## Getting Started
+
+To get Lukas up and running on your local machine, follow these simple steps.
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v18 or later recommended)
-- [Gemini API Key](https://ai.google.dev/)
+- **Node.js:** Ensure you have Node.js (v18 or later) installed. You can download it from [nodejs.org](https://nodejs.org/).
+- **Gemini API Key:** You'll need a Google Gemini API key. You can obtain one from the [Google AI for Developers](https://ai.google.dev/) website.
 
-### Installation
+### Installation and Setup
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/your-username/lukas-ai-orchestrator.git
-   cd lukas-ai-orchestrator
-   ```
+1.  **Clone the Repository:**
+    ```bash
+    git clone https://github.com/your-username/lukas-ai-orchestrator.git
+    cd lukas-ai-orchestrator
+    ```
 
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
+2.  **Install Dependencies:**
+    ```bash
+    npm install
+    ```
 
-3. **Set up environment variables:**
-   - Create a new file in the project root called `.env`.
-   - Add your `GEMINI_API_KEY` to the file:
-     ```
-     GEMINI_API_KEY=YOUR_API_KEY_HERE
-     ```
+3.  **Configure Environment Variables:**
+    Create a `.env` file in the root of the project and add your Gemini API key as follows:
+    ```
+    GEMINI_API_KEY=YOUR_API_KEY_HERE
+    ```
 
-4. **Run the development server:**
-   ```bash
-   npm run dev
-   ```
-   Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+4.  **Run the Development Server:**
+    ```bash
+    npm run dev
+    ```
+    The application will be available at `http://localhost:3000`.
 
-## 📜 Available Scripts
+## Technology Stack
 
-- `npm run dev`: Runs the app in development mode.
-- `npm run build`: Builds the app for production to the `dist` folder.
-- `npm run preview`: Previews the production build locally.
+- **Frontend:** React, TypeScript, Vite
+- **AI:** Google Gemini API
+- **Styling:** Tailwind CSS
 
+---
+
+We hope you enjoy exploring the capabilities of Lukas. If you have any questions or suggestions, feel free to open an issue or submit a pull request.
