@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Agent, StepResult, Conversation, StoredFile, PlanStep, Clarification, GroundingSource } from './types';
-import { AgentIcon, ClockIcon, CheckCircleIcon, LoadingSpinnerIcon, SunIcon, MoonIcon, ComputerIcon, OrchestratorIcon, UserIcon, WindowCloseIcon, WindowMaximizeIcon, WindowMinimizeIcon, SearchIcon, MapIcon, ArrowUpIcon, SettingsIcon, CogIcon, SheetsIcon } from './components/icons';
+import { Agent, StepResult, Conversation, StoredFile, PlanStep, Clarification, GroundingSource, Exchange } from './types';
+import { AgentIcon, ClockIcon, CheckCircleIcon, LoadingSpinnerIcon, SunIcon, MoonIcon, ComputerIcon, OrchestratorIcon, UserIcon, WindowCloseIcon, WindowMaximizeIcon, WindowMinimizeIcon, SearchIcon, MapIcon, ArrowUpIcon, SettingsIcon, CogIcon, SheetsIcon, ImageIcon, PaperclipIcon } from './components/icons';
 import { useLocation } from './hooks/useLocation';
-import { generatePlan, executeSearch, executeMap, executeVision, executeVideo, synthesizeAnswer, executeEmail, executeSheets, executeDrive, executeOrchestratorIntermediateStep } from './services/geminiService';
+import { generatePlan, executeSearch, executeMap, executeVision, executeVideo, synthesizeAnswer, executeEmail, executeSheets, executeDrive, executeOrchestratorIntermediateStep, executeImageGeneration } from './services/geminiService';
 import { marked } from 'marked';
 import { translations, Localization, Lang } from './localization';
 
@@ -10,7 +10,7 @@ import { translations, Localization, Lang } from './localization';
 
 const StreamingMarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
     const html = useMemo(() => marked.parse(content, { gfm: true, breaks: true }), [content]);
-    return <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: html as string }} />;
+    return <div className="prose prose-sm max-w-none text-left rtl:text-right" dangerouslySetInnerHTML={{ __html: html as string }} />;
 };
 
 // --- RIGHT PANEL COMPONENTS ---
@@ -58,11 +58,7 @@ const AgentVisualizer: React.FC<{ step: StepResult | null; t: (key: keyof Locali
         // Completed / Error states
         switch (step.agent) {
             case Agent.MapsAgent: {
-                // The step.result contains the markdown list of places found by the agent.
-                // The Google Maps embed API is smart enough to parse this list and place pins for recognized locations.
-                // This is more reliable than trying to parse a single source URI.
                 const mapQuery = step.result || step.task;
-
                 return (
                     <div className="w-full flex-grow bg-[var(--bg-secondary-color)] flex flex-col">
                         <div className="p-2 border-b border-[var(--border-color)] flex items-center space-x-2 rtl:space-x-reverse flex-shrink-0">
@@ -96,7 +92,7 @@ const AgentVisualizer: React.FC<{ step: StepResult | null; t: (key: keyof Locali
 
 const VirtualComputer: React.FC<{ viewedStep: StepResult | null; t: (key: keyof Localization) => string; }> = ({ viewedStep, t }) => {
     return (
-        <div className="card flex flex-col flex-grow">
+        <div className="card flex flex-col h-full">
             <header className="flex items-center justify-between p-2 border-b border-[var(--border-color)]">
                 <div className="flex items-center space-x-2 rtl:space-x-reverse">
                     <AgentIcon agent={viewedStep?.agent || Agent.Orchestrator} className="w-4 h-4 text-[var(--text-secondary-color)]" />
@@ -122,7 +118,7 @@ const TaskProgress: React.FC<{
     t: (key: keyof Localization) => string; 
 }> = ({ plan, results, onStepSelect, viewedStep, t }) => {
     if (!plan || plan.length === 0) {
-        return <div className="card p-4 h-48"><h3 className="font-bold text-sm mb-2">{t('taskProgress')}</h3><p className="text-sm text-[var(--text-secondary-color)]">{t('computerStatusWaiting')}</p></div>
+        return <div className="card p-4 h-full"><h3 className="font-bold text-sm mb-2">{t('taskProgress')}</h3><p className="text-sm text-[var(--text-secondary-color)]">{t('computerStatusWaiting')}</p></div>
     }
     const getStatusIcon = (status: StepResult['status']) => {
         switch (status) {
@@ -134,7 +130,7 @@ const TaskProgress: React.FC<{
     }
     
     return (
-        <div className="card p-4 h-48 overflow-y-scroll">
+        <div className="card p-4 h-full overflow-y-scroll">
             <h3 className="font-bold text-sm mb-3">{t('taskProgress')}</h3>
             <ul className="space-y-1">
                 {plan.map(step => {
@@ -260,7 +256,16 @@ const App: React.FC = () => {
     const [conversations, setConversations] = useState<Conversation[]>(() => {
         try {
             const saved = localStorage.getItem('lukas_conversations');
-            return saved ? JSON.parse(saved).map((c: Conversation) => ({ ...c, imageFile: null, videoFile: null })) : [];
+            if (!saved) return [];
+            const parsed = JSON.parse(saved);
+            return parsed.map((convo: Conversation) => ({
+                ...convo,
+                exchanges: convo.exchanges.map((ex: any) => ({
+                    ...ex,
+                    imageFile: null,
+                    videoFile: null,
+                }))
+            }));
         } catch { return []; }
     });
     const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -269,35 +274,27 @@ const App: React.FC = () => {
     const { location } = useLocation();
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [cycleCount, setCycleCount] = useState(1);
+    const [attachedFile, setAttachedFile] = useState<File | null>(null);
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     
     const activeConversation = useMemo(() => conversations.find(c => c.id === activeConversationId), [conversations, activeConversationId]);
+    const activeExchange = useMemo(() => {
+        if (!activeConversation) return null;
+        return activeConversation.exchanges[activeConversation.exchanges.length - 1];
+    }, [activeConversation]);
+    
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const chatEndRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
     
     useEffect(() => {
-        // If there's no active conversation or results, clear the view
-        if (!activeConversation?.results || activeConversation.results.length === 0) {
-            setViewedStep(null);
-            return;
-        }
-
-        const runningStep = activeConversation.results.find(r => r.status === 'running');
-        if (runningStep) {
-            // Always prioritize showing the currently running step
-            setViewedStep(runningStep);
-            return;
-        }
-    
-        const latestProcessedStep = [...activeConversation.results]
-            .reverse()
-            .find(r => r.status === 'completed' || r.status === 'error');
-
-        if (latestProcessedStep) {
-            setViewedStep(latestProcessedStep);
-        } else if (activeConversation.status === 'executing' && activeConversation.results.length > 0) {
-            setViewedStep(activeConversation.results[0]);
-        }
-
-    }, [activeConversation]);
-
+        if (!activeExchange?.results || activeExchange.results.length === 0) { setViewedStep(null); return; }
+        const runningStep = activeExchange.results.find(r => r.status === 'running');
+        if (runningStep) { setViewedStep(runningStep); return; }
+        const latestProcessedStep = [...activeExchange.results].reverse().find(r => r.status === 'completed' || r.status === 'error');
+        if (latestProcessedStep) { setViewedStep(latestProcessedStep); } 
+        else if (activeExchange.status === 'executing' && activeExchange.results.length > 0) { setViewedStep(activeExchange.results[0]); }
+    }, [activeExchange]);
 
     const t = useMemo(() => (key: keyof Localization, ...args: (string | number)[]) => {
         let translation = translations[lang][key] || translations['en'][key];
@@ -317,117 +314,173 @@ const App: React.FC = () => {
         localStorage.setItem('lukas_theme', theme);
     }, [theme]);
     useEffect(() => {
-        localStorage.setItem('lukas_conversations', JSON.stringify(conversations.map(({ imageFile, videoFile, ...rest }) => rest)));
+        const serializableConversations = conversations.map(convo => ({
+            ...convo,
+            exchanges: convo.exchanges.map(({ imageFile, videoFile, ...rest }) => rest)
+        }));
+        localStorage.setItem('lukas_conversations', JSON.stringify(serializableConversations));
     }, [conversations]);
     
-    const toggleTheme = () => setTheme(theme === 'light' ? 'dark' : 'light');
-    const toggleLang = () => setLang(lang === 'en' ? 'ar' : 'en');
-    
-    const chatEndRef = useRef<HTMLDivElement>(null);
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
     useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [activeConversation, isLoading]);
     useEffect(() => { if (textareaRef.current) { textareaRef.current.style.height = 'auto'; textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`; } }, [prompt]);
 
-    const updateStepResult = (convoId: string, step: number, updates: Partial<StepResult>, appendResult: string = '') => {
-        setConversations(prev => prev.map(c => {
-            if (c.id !== convoId) return c;
-            const newResults = c.results.map(r => r.step === step ? { ...r, ...updates, result: (updates.result !== undefined) ? updates.result : r.result + appendResult } : r);
-            return { ...c, results: newResults };
-        }));
+    const toggleTheme = () => setTheme(theme === 'light' ? 'dark' : 'light');
+    const toggleLang = () => setLang(lang === 'en' ? 'ar' : 'en');
+
+    const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            setAttachedFile(file);
+            setPreviewUrl(URL.createObjectURL(file));
+        }
     };
 
+    const clearAttachment = () => {
+        setAttachedFile(null);
+        if (previewUrl) { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }
+        if(fileInputRef.current) { fileInputRef.current.value = ""; }
+    };
+    
+    const updateExchange = (convoId: string, exchangeId: string, updates: Partial<Exchange>) => {
+        setConversations(prevConvos => prevConvos.map(c => {
+            if (c.id !== convoId) return c;
+            const newExchanges = c.exchanges.map(ex => 
+                ex.id === exchangeId ? { ...ex, ...updates } : ex
+            );
+            return { ...c, exchanges: newExchanges };
+        }));
+    };
+    
+    const updateStepResult = (convoId: string, exchangeId: string, step: number, updates: Partial<StepResult>, appendResult: string = '') => {
+        setConversations(prev => prev.map(c => {
+            if (c.id !== convoId) return c;
+            const newExchanges = c.exchanges.map(ex => {
+                if (ex.id !== exchangeId) return ex;
+                const newResults = ex.results.map(r => r.step === step ? { ...r, ...updates, result: (updates.result !== undefined) ? updates.result : r.result + appendResult } : r);
+                return { ...ex, results: newResults };
+            });
+            return { ...c, exchanges: newExchanges };
+        }));
+    };
+    
     const handleSubmitPrompt = async (promptToSubmit: string) => {
-        if (!promptToSubmit.trim() || isLoading) return;
+        if ((!promptToSubmit.trim() && !attachedFile) || isLoading) return;
         
         setIsLoading(true);
         setPrompt('');
 
-        const newConversation: Conversation = {
-            id: Date.now().toString(), prompt: promptToSubmit, imageFile: null, videoFile: null,
+        const exchangeId = Date.now().toString();
+        const newExchange: Exchange = {
+            id: exchangeId,
+            prompt: promptToSubmit,
+            imageFile: attachedFile && attachedFile.type.startsWith('image/') ? attachedFile : null,
+            videoFile: attachedFile && attachedFile.type.startsWith('video/') ? attachedFile : null,
             plan: null, results: [], status: 'planning',
         };
-        setConversations(prev => [...prev, newConversation]);
-        setActiveConversationId(newConversation.id);
+        clearAttachment();
         
-        try {
-            const planResponse = await generatePlan(promptToSubmit, false, false, [], cycleCount);
+        let convoToUpdateId: string;
+        let convoToUpdate: Conversation;
 
-            setConversations(prev => prev.map(c => 
-                c.id === newConversation.id 
-                ? { ...c, 
-                    plan: planResponse.plan || null, 
-                    clarification: planResponse.clarification || null,
-                    status: planResponse.clarification ? 'clarification_needed' : 'planning' 
-                  } 
-                : c
-            ));
+        if (activeConversationId) {
+            convoToUpdateId = activeConversationId;
+            setConversations(prev => prev.map(c => {
+                if (c.id !== convoToUpdateId) return c;
+                convoToUpdate = { ...c, exchanges: [...c.exchanges, newExchange] };
+                return convoToUpdate;
+            }));
+        } else {
+            const newConvoId = Date.now().toString();
+            convoToUpdateId = newConvoId;
+            convoToUpdate = {
+                id: newConvoId,
+                title: promptToSubmit,
+                exchanges: [newExchange]
+            };
+            setConversations(prev => [...prev, convoToUpdate]);
+            setActiveConversationId(newConvoId);
+        }
+        
+        const currentConvo = conversations.find(c => c.id === convoToUpdateId) || convoToUpdate!;
+        const history = (currentConvo.exchanges || [])
+            .slice(0, -1)
+            .filter(ex => ex.status === 'completed')
+            .map(ex => ({ prompt: ex.prompt, results: ex.results }));
+
+        try {
+            const planResponse = await generatePlan(promptToSubmit, !!newExchange.imageFile, !!newExchange.videoFile, history as any, cycleCount);
+
+            updateExchange(convoToUpdateId, exchangeId, {
+                plan: planResponse.plan || null,
+                clarification: planResponse.clarification || null,
+                status: planResponse.clarification ? 'clarification_needed' : 'planning'
+            });
             
             if(planResponse.plan) {
-                await handleExecute({ ...newConversation, plan: planResponse.plan });
+                 await handleExecute(convoToUpdateId, exchangeId, newExchange, planResponse.plan);
             }
         } catch (err: any) { 
             const errorMessage = err.message || t('unknownError');
-            setConversations(prev => prev.map(c => 
-                c.id === newConversation.id 
-                ? { ...c, status: 'error', errorMessage } 
-                : c
-            ));
+            updateExchange(convoToUpdateId, exchangeId, { status: 'error', errorMessage });
         } 
         finally { setIsLoading(false); }
     };
     
     const handlePlan = () => handleSubmitPrompt(prompt);
 
-    const handleClarificationResponse = async (convo: Conversation, selectedOption: { key: string; value: string; }) => {
+    const handleClarificationResponse = async (convoId: string, exchangeId: string, exchange: Exchange, selectedOption: { key: string; value: string; }) => {
         setIsLoading(true);
-        setConversations(prev => prev.map(c => c.id === convo.id ? { ...c, status: 'planning', clarification: null } : c));
-        
-        const clarifiedPrompt = `The user's original request was: "${convo.prompt}". I asked for clarification, and the user chose: "${selectedOption.value}". Now, please generate the execution plan based on this clarified request.`;
+        updateExchange(convoId, exchangeId, { status: 'planning', clarification: null });
+
+        const clarifiedPrompt = `The user's original request was: "${exchange.prompt}". I asked for clarification, and the user chose: "${selectedOption.value}". Now, please generate the execution plan based on this clarified request.`;
         
         try {
-            const planResponse = await generatePlan(clarifiedPrompt, false, false, [], cycleCount);
+            const currentConvo = conversations.find(c => c.id === convoId)!;
+            const history = currentConvo.exchanges
+                .filter(ex => ex.id !== exchangeId && ex.status === 'completed')
+                .map(ex => ({ prompt: ex.prompt, results: ex.results }));
+
+            const planResponse = await generatePlan(clarifiedPrompt, !!exchange.imageFile, !!exchange.videoFile, history as any, cycleCount);
             if (!planResponse.plan) throw new Error("Failed to get a plan after clarification.");
             
-            const conversationToExecute: Conversation = { ...convo, plan: planResponse.plan, clarification: null, status: 'planning' };
-            setConversations(prev => prev.map(c => c.id === convo.id ? conversationToExecute : c));
-            await handleExecute(conversationToExecute);
+            updateExchange(convoId, exchangeId, { plan: planResponse.plan, clarification: null, status: 'planning' });
+            await handleExecute(convoId, exchangeId, { ...exchange, plan: planResponse.plan }, planResponse.plan);
 
         } catch (err: any) {
             const errorMessage = err.message || t('unknownError');
-            setConversations(prev => prev.map(c => c.id === convo.id ? { ...c, status: 'error', errorMessage } : c));
+            updateExchange(convoId, exchangeId, { status: 'error', errorMessage });
         } finally { setIsLoading(false); }
     };
 
-    const handleExecute = async (conversation: Conversation) => {
-        const { id: convoId, plan } = conversation;
-        if (!plan) return;
-
+    const handleExecute = async (convoId: string, exchangeId: string, exchange: Exchange, plan: PlanStep[]) => {
         let generatedSheetFile: StoredFile | null = null;
         try {
             setIsLoading(true);
-            setConversations(prev => prev.map(c => c.id === convoId ? { ...c, status: 'executing', plan, results: plan.map(step => ({ ...step, result: '', status: 'pending' })) } : c));
+            updateExchange(convoId, exchangeId, { status: 'executing', plan, results: plan.map(step => ({ ...step, result: '', status: 'pending' })) });
             
             let stepOutputs: StepResult[] = [];
             for (const step of plan) {
-                updateStepResult(convoId, step.step, { status: 'running' });
+                updateStepResult(convoId, exchangeId, step.step, { status: 'running' });
                 let fullStepResult = '';
                 
                 try {
-                    const onChunk = (chunk: string) => { updateStepResult(convoId, step.step, {}, chunk); fullStepResult += chunk; };
+                    const onChunk = (chunk: string) => { updateStepResult(convoId, exchangeId, step.step, {}, chunk); fullStepResult += chunk; };
                     let r: any = {};
+                    let imageBase64Data: string | undefined;
                     
                     if (step.agent === Agent.Orchestrator) {
-                        if (step.step === plan.length) { // Final synthesis step
-                            r = await synthesizeAnswer(conversation.prompt, stepOutputs, onChunk);
-                        } else { // Intermediate to-do or validation step
-                            r = await executeOrchestratorIntermediateStep(step.task, conversation.prompt, stepOutputs, onChunk);
-                        }
+                        if (step.step === plan.length) { r = await synthesizeAnswer(exchange.prompt, stepOutputs, onChunk); } 
+                        else { r = await executeOrchestratorIntermediateStep(step.task, exchange.prompt, stepOutputs, onChunk); }
                     } else {
                         switch (step.agent) {
                             case Agent.SearchAgent: r = await executeSearch(step.task, onChunk); break;
                             case Agent.MapsAgent: r = await executeMap(step.task, location, onChunk); break;
-                            case Agent.VisionAgent: r = await executeVision(step.task, conversation.imageFile!, onChunk); break;
-                            case Agent.VideoAgent: r = await executeVideo(step.task, conversation.videoFile!, onChunk); break;
+                            case Agent.VisionAgent: r = await executeVision(step.task, exchange.imageFile!, onChunk); break;
+                            case Agent.VideoAgent: r = await executeVideo(step.task, exchange.videoFile!, onChunk); break;
+                            case Agent.ImageGenerationAgent:
+                                r = await executeImageGeneration(step.task, onChunk);
+                                imageBase64Data = r.imageBase64;
+                                break;
                             case Agent.EmailAgent: r = await executeEmail(step.task, onChunk); break;
                             case Agent.DriveAgent: r = await executeDrive(step.task, onChunk); break;
                             case Agent.SheetsAgent: {
@@ -439,40 +492,89 @@ const App: React.FC = () => {
                         }
                     }
                     
-                    const completedStep = { ...step, result: fullStepResult, status: 'completed' as const, sources: r.sources };
-                    updateStepResult(convoId, step.step, completedStep);
-                    stepOutputs.push(completedStep);
+                    const completedStep: StepResult = {
+                        ...step,
+                        result: fullStepResult,
+                        status: 'completed',
+                        sources: r.sources,
+                        imageBase64: imageBase64Data,
+                    };
 
-                    // Pause after completing a step to let the user see the result, but not after the final step.
-                    if (step.step < plan.length) {
-                        await new Promise(resolve => setTimeout(resolve, 5000));
-                    }
+                    updateStepResult(convoId, exchangeId, step.step, completedStep);
+                    stepOutputs.push(completedStep);
+                    if (step.step < plan.length) { await new Promise(resolve => setTimeout(resolve, 1000)); }
                 } catch (e: any) {
-                    updateStepResult(convoId, step.step, { status: 'error', result: e.message }); throw e;
+                    updateStepResult(convoId, exchangeId, step.step, { status: 'error', result: e.message }); throw e;
                 }
             }
-
-            setConversations(prev => prev.map(c => c.id === convoId ? { ...c, status: 'completed', generatedFile: generatedSheetFile } : c));
+            updateExchange(convoId, exchangeId, { status: 'completed', generatedFile: generatedSheetFile });
         } catch (err: any) {
             console.error(err);
             const errorMessage = err.message || t('unknownError');
-            setConversations(prev => prev.map(c => c.id === convoId ? { ...c, status: 'error', errorMessage } : c));
+            updateExchange(convoId, exchangeId, { status: 'error', errorMessage });
         } finally {
             setIsLoading(false);
         }
     };
     
-    const showComputer = activeConversation && (activeConversation.status !== 'planning' && activeConversation.status !== 'clarification_needed');
+    const showComputer = activeExchange && (activeExchange.status !== 'planning' && activeExchange.status !== 'clarification_needed');
     
     const examplePrompts = [
         { icon: <MapIcon className="w-6 h-6 text-[var(--accent-color)]" />, title: "Find a place", prompt: "Find cafes near Central Park, NYC" },
+        { icon: <ImageIcon className="w-6 h-6 text-[var(--accent-color)]" />, title: "Create an image", prompt: "Generate an image of a photorealistic cat wearing sunglasses" },
         { icon: <SheetsIcon className="w-6 h-6 text-[var(--accent-color)]" />, title: "Organize data", prompt: "Create a spreadsheet of the top 5 largest cities in the world by population in 2024" },
-        { icon: <SearchIcon className="w-6 h-6 text-[var(--accent-color)]" />, title: "Get latest news", prompt: "What are the latest developments in AI this week?" },
     ];
 
-    const handleNewChat = () => {
-        setActiveConversationId(null);
-        setViewedStep(null);
+    const handleNewChat = () => { setActiveConversationId(null); setViewedStep(null); }
+    
+    const renderExchangeResponse = (exchange: Exchange) => {
+        if (exchange.status === 'completed') {
+             const finalAnswer = exchange.results.find(r => r.agent === Agent.Orchestrator && r.step === exchange.plan?.length);
+             const finalImage = exchange.results.find(r => r.imageBase64);
+             if (!finalAnswer && !finalImage) return null;
+
+            const allSources = Array.from(new Map(exchange.results.flatMap(r => r.sources || []).map(s => [s.uri, s])).values());
+            
+            return (
+                <>
+                    {finalAnswer && (
+                        <ChatMessage 
+                            agent={Agent.Orchestrator} 
+                            content={<StreamingMarkdownRenderer content={finalAnswer.result} />}
+                            sources={allSources}
+                        />
+                    )}
+                    {finalImage && (
+                        <ChatMessage
+                            agent={Agent.Orchestrator}
+                            content={
+                                <img
+                                    src={`data:image/png;base64,${finalImage.imageBase64}`}
+                                    alt={finalImage.task}
+                                    className="rounded-lg max-w-full h-auto"
+                                />
+                            }
+                        />
+                    )}
+                </>
+            );
+        }
+        if (exchange.status === 'clarification_needed' && exchange.clarification && activeConversation) {
+            return (
+                <ChatMessage 
+                    agent={Agent.Orchestrator} 
+                    content={<ClarificationRequest 
+                        clarification={exchange.clarification} 
+                        onSelect={(option) => handleClarificationResponse(activeConversation.id, exchange.id, exchange, option)} 
+                        disabled={isLoading} 
+                    />} 
+                />
+            );
+        }
+        if (exchange.status === 'error' && exchange.errorMessage) {
+            return <ChatMessage agent={Agent.Orchestrator} content={`${t('errorMessage')}: ${exchange.errorMessage}`} />;
+        }
+        return null;
     }
 
     return (
@@ -487,7 +589,7 @@ const App: React.FC = () => {
                  <div className="flex-grow overflow-y-scroll p-2 space-y-1">
                     {conversations.slice().reverse().map(convo => (
                         <button key={convo.id} onClick={() => setActiveConversationId(convo.id)} className={`w-full text-left rtl:text-right p-2 rounded-md text-sm truncate ${activeConversationId === convo.id ? 'bg-[var(--accent-color)] text-white' : 'hover:bg-[var(--hover-bg-color)]'}`}>
-                            {convo.prompt}
+                            {convo.title || t('newChat')}
                         </button>
                     ))}
                 </div>
@@ -504,9 +606,9 @@ const App: React.FC = () => {
 
             {/* Main Content */}
             <div className="flex-grow flex flex-col min-w-0">
-                <div className={`flex-grow min-h-0 grid ${showComputer ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
+                 <div className={`flex-grow min-h-0 grid ${showComputer ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
                     {/* Left Panel: Chat */}
-                    <div className="flex flex-col h-full bg-[var(--bg-color)]">
+                    <div className="flex flex-col h-full min-h-0 bg-[var(--bg-color)]">
                         <main className="flex-grow min-h-0 w-full overflow-y-scroll p-4 space-y-6">
                            {!activeConversation ? (
                              <div className="w-full h-full flex flex-col items-center justify-center text-center p-4">
@@ -516,16 +618,8 @@ const App: React.FC = () => {
                                 <div className="mt-8 w-full max-w-4xl">
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-left rtl:text-right">
                                         {examplePrompts.map((p, i) => (
-                                            <button 
-                                                key={i} 
-                                                onClick={() => handleSubmitPrompt(p.prompt)}
-                                                disabled={isLoading}
-                                                className="card p-4 hover:bg-[var(--hover-bg-color)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left rtl:text-right"
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    {p.icon}
-                                                    <h3 className="font-bold">{p.title}</h3>
-                                                </div>
+                                            <button key={i} onClick={() => handleSubmitPrompt(p.prompt)} disabled={isLoading} className="card p-4 hover:bg-[var(--hover-bg-color)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left rtl:text-right">
+                                                <div className="flex items-center gap-3">{p.icon} <h3 className="font-bold">{p.title}</h3></div>
                                                 <p className="text-sm text-[var(--text-secondary-color)] mt-2">{p.prompt}</p>
                                             </button>
                                         ))}
@@ -534,27 +628,13 @@ const App: React.FC = () => {
                             </div>
                            ) : (
                             <>
-                                <ChatMessage agent={Agent.User} content={activeConversation.prompt} />
-                                {activeConversation.status === 'completed' && activeConversation.results.find(r => r.agent === Agent.Orchestrator && r.step === activeConversation.plan?.length) &&
-                                    <ChatMessage 
-                                        agent={Agent.Orchestrator} 
-                                        content={<StreamingMarkdownRenderer content={activeConversation.results.find(r => r.agent === Agent.Orchestrator && r.step === activeConversation.plan?.length)!.result} />}
-                                        sources={Array.from(new Map(activeConversation.results.flatMap(r => r.sources || []).map(s => [s.uri, s])).values())}
-                                    />
-                                }
-                                {activeConversation.status === 'clarification_needed' && activeConversation.clarification && (
-                                    <ChatMessage agent={Agent.Orchestrator} content={
-                                        <ClarificationRequest 
-                                            clarification={activeConversation.clarification} 
-                                            onSelect={(option) => handleClarificationResponse(activeConversation, option)}
-                                            disabled={isLoading}
-                                        />
-                                    }/>
-                                )}
-                                {activeConversation.status === 'error' && activeConversation.errorMessage &&
-                                    <ChatMessage agent={Agent.Orchestrator} content={`${t('errorMessage')}: ${activeConversation.errorMessage}`} />
-                                }
-                               {isLoading && activeConversation.status !== 'completed' && <ChatMessage agent={Agent.Orchestrator} content={<div className="flex justify-center items-center p-2"><LoadingSpinnerIcon className="w-6 h-6" /></div>} />}
+                                {activeConversation.exchanges.map(exchange => (
+                                    <React.Fragment key={exchange.id}>
+                                        <ChatMessage agent={Agent.User} content={exchange.prompt} />
+                                        {renderExchangeResponse(exchange)}
+                                    </React.Fragment>
+                                ))}
+                               {isLoading && activeExchange && activeExchange.status !== 'completed' && <ChatMessage agent={Agent.Orchestrator} content={<div className="flex justify-center items-center p-2"><LoadingSpinnerIcon className="w-6 h-6" /></div>} />}
                             </>
                            )}
                             <div ref={chatEndRef} />
@@ -562,21 +642,25 @@ const App: React.FC = () => {
                         
                         <footer className="flex-shrink-0 p-4">
                             <div className="relative">
-                                <SettingsPopover 
-                                    isOpen={isSettingsOpen}
-                                    cycleCount={cycleCount}
-                                    setCycleCount={setCycleCount}
-                                    onClose={() => setIsSettingsOpen(false)}
-                                    t={t}
-                                />
+                                <SettingsPopover isOpen={isSettingsOpen} cycleCount={cycleCount} setCycleCount={setCycleCount} onClose={() => setIsSettingsOpen(false)} t={t} />
+                                {previewUrl && (
+                                    <div className="relative w-24 h-24 mb-2 p-1 border border-[var(--border-color)] rounded-md">
+                                        <img src={previewUrl} className="w-full h-full object-cover rounded" />
+                                        <button onClick={clearAttachment} className="absolute -top-2 -right-2 rtl:-right-auto rtl:-left-2 bg-gray-800 text-white rounded-full p-0.5"><WindowCloseIcon className="w-4 h-4" /></button>
+                                    </div>
+                                )}
                                 <div className="card p-2 flex items-end gap-2 rtl:space-x-reverse">
-                                     <button onClick={handlePlan} disabled={isLoading || !prompt.trim()} className="bg-[var(--accent-color)] text-white h-9 w-9 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all flex justify-center items-center flex-shrink-0">
-                                        {isLoading ? <LoadingSpinnerIcon className="w-5 h-5"/> : <ArrowUpIcon className="w-5 h-5" />}
-                                    </button>
+                                    <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*,video/*" />
+                                     <button onClick={() => fileInputRef.current?.click()} disabled={isLoading} className="p-1.5 rounded-md text-[var(--text-secondary-color)] hover:bg-[var(--hover-bg-color)] transition-colors flex-shrink-0 h-9 w-9 flex items-center justify-center">
+                                        <PaperclipIcon className="w-6 h-6" />
+                                     </button>
                                      <textarea ref={textareaRef} value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handlePlan(); } }} placeholder={t('promptPlaceholder')} className="flex-grow bg-transparent focus:outline-none resize-none text-base p-1.5 max-h-40" rows={1} disabled={isLoading} />
-                                     <button onClick={() => setIsSettingsOpen(prev => !prev)} className="p-1.5 rounded-md text-[var(--text-secondary-color)] hover:bg-[var(--hover-bg-color)] transition-colors">
+                                     <button onClick={() => setIsSettingsOpen(prev => !prev)} className="p-1.5 rounded-md text-[var(--text-secondary-color)] hover:bg-[var(--hover-bg-color)] transition-colors h-9 w-9 flex items-center justify-center flex-shrink-0">
                                         <CogIcon className="w-6 h-6" />
                                      </button>
+                                     <button onClick={handlePlan} disabled={isLoading || (!prompt.trim() && !attachedFile)} className="bg-[var(--accent-color)] text-white h-9 w-9 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all flex justify-center items-center flex-shrink-0">
+                                        {isLoading ? <LoadingSpinnerIcon className="w-5 h-5"/> : <ArrowUpIcon className="w-5 h-5" />}
+                                    </button>
                                 </div>
                             </div>
                         </footer>
@@ -585,14 +669,12 @@ const App: React.FC = () => {
                     {/* Right Panel: Computer */}
                     {showComputer && (
                         <div className="hidden lg:flex flex-col h-full p-4 space-y-4 bg-[var(--bg-tertiary-color)] border-l border-[var(--border-color)] animate-fade-in">
-                            <VirtualComputer viewedStep={viewedStep} t={t} />
-                            <TaskProgress 
-                                plan={activeConversation?.plan || null} 
-                                results={activeConversation?.results || []} 
-                                onStepSelect={setViewedStep}
-                                viewedStep={viewedStep}
-                                t={t}
-                            />
+                           <div className="flex-1 min-h-0">
+                               <VirtualComputer viewedStep={viewedStep} t={t} />
+                           </div>
+                           <div className="flex-1 min-h-0">
+                               <TaskProgress plan={activeExchange?.plan || null} results={activeExchange?.results || []} onStepSelect={setViewedStep} viewedStep={viewedStep} t={t} />
+                           </div>
                         </div>
                     )}
                 </div>

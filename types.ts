@@ -6,6 +6,7 @@ export enum Agent {
   EmailAgent = 'EmailAgent',
   SheetsAgent = 'SheetsAgent',
   DriveAgent = 'DriveAgent',
+  ImageGenerationAgent = 'ImageGenerationAgent',
   Orchestrator = 'Orchestrator',
   User = 'User',
 }
@@ -36,6 +37,7 @@ export interface StepResult {
   result: string;
   sources?: GroundingSource[];
   status: 'pending' | 'running' | 'completed' | 'error';
+  imageBase64?: string;
 }
 
 export interface Geolocation {
@@ -49,7 +51,7 @@ export interface Clarification {
 }
 
 
-export interface Conversation {
+export interface Exchange {
     id: string;
     prompt: string;
     imageFile: File | null;
@@ -60,4 +62,10 @@ export interface Conversation {
     generatedFile?: StoredFile | null;
     clarification?: Clarification | null;
     errorMessage?: string;
+}
+
+export interface Conversation {
+    id: string;
+    title: string;
+    exchanges: Exchange[];
 }
